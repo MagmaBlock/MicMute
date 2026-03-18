@@ -96,19 +96,19 @@ internal sealed class TrayApp : Form
         InvalidateTooltipCache();
         SyncTrayIcon();
 
-        // Register hotkeys
-        RegisterMainHotkey();
-        RegisterDeafenHotkey();
-
-        // Explorer restart recovery
-        _wmTaskbarCreated = NativeMethods.RegisterWindowMessage("TaskbarCreated");
+        // OSD form (must be created before hotkey registration — errors show via OSD)
+        _osdForm = new OsdForm();
 
         // Flash timer (reusable, not started)
         _flashTimer = new System.Windows.Forms.Timer { Interval = 100 };
         _flashTimer.Tick += OnFlashTick;
 
-        // OSD form (reusable)
-        _osdForm = new OsdForm();
+        // Explorer restart recovery
+        _wmTaskbarCreated = NativeMethods.RegisterWindowMessage("TaskbarCreated");
+
+        // Register hotkeys
+        RegisterMainHotkey();
+        RegisterDeafenHotkey();
 
         // Periodic sync timer — 5 seconds
         _syncTimer = new System.Windows.Forms.Timer { Interval = 5000 };
