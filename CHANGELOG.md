@@ -2,6 +2,23 @@
 
 All notable changes to MicMute are documented here.
 
+## [2.0.0] - 2026-03-18
+
+### New Features
+- **Complete C# rewrite** — ported from AutoHotkey v2 to C# .NET 8 WinForms for better maintainability and performance
+- All features from v1.8.3 preserved: toggle/PTT modes, deafen, mute lock, OSD, sound feedback, custom icons, device selection, hotkey customization, startup control
+
+### Code Quality
+- Proper resource disposal throughout (COM handles, GDI objects, fonts, menu items)
+- Zero-allocation hot paths (sync timer, flash timer)
+- Click-through OSD overlay with Win11 rounded corners
+- Lazy-loaded device menu for snappy tray interaction
+- Singleton dialogs (settings, help) prevent duplicate windows
+
+### Removed
+- AutoHotkey dependency — runs on .NET 8 runtime or as a standalone exe
+- Original AHK script moved to `legacy/` folder
+
 ## [1.8.3] - 2026-03-13
 
 ### Fixed

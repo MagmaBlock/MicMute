@@ -1,6 +1,10 @@
-# AutoHotkey
+# Build output
+bin/
+obj/
 *.exe
 *.log
+
+# Config
 *.ini
 
 # Windows
@@ -15,6 +19,10 @@ $RECYCLE.BIN/
 # Task Management
 TODO_LIST.md
 SCHEDULED_TASKS.md
+ASSUMPTIONS.md
+AUDIT_TASKS.md
+FINAL_REPORT.md
+CLAUDE.md
 
 # IDE / Editor
 .vscode/
@@ -22,6 +30,7 @@ SCHEDULED_TASKS.md
 *.swp
 *.swo
 *~
+*.user
 
 # macOS
 .DS_Store
@@ -31,7 +40,3 @@ SCHEDULED_TASKS.md
 *.bak
 *.orig
 *.rej
-ASSUMPTIONS.md
-AUDIT_TASKS.md
-FINAL_REPORT.md
-CLAUDE.md

@@ -1,199 +1,136 @@
 # MicMute
 
-Global microphone mute/unmute toggle for Windows with a system tray indicator.
+Global hotkey microphone mute/unmute for Windows.
 
-**[Installation](#installation)** · **[Features](#features)** · **[Configuration](#configuration)** · **[Tray Menu](#tray-menu)** · **[How It Works](#how-it-works)**
-
-## Screenshots
-
-| Tray Icon (Active) | Tray Icon (Muted) |
-|:---:|:---:|
-| ![Mic Active](screenshots/micicon1.png) | ![Mic Muted](screenshots/micicon2.png) |
-
-| Tray Menu | Settings |
-|:---:|:---:|
-| ![Tray Menu](screenshots/micmutemenu.png) | ![Settings](screenshots/micmutesettings.png) |
-
-## Installation
-
-### Requirements
-
-- Windows 10/11
-- [AutoHotkey v2](https://www.autohotkey.com/) (or use the compiled .exe)
-
-### Quick Start
-
-1. Download the latest release ([`MicMute.exe`](https://github.com/itsnateai/MicMute/releases/latest)) — no AutoHotkey installation needed, icons are embedded
-2. Or clone/download this repo and run `MicMute.ahk` with [AutoHotkey v2](https://www.autohotkey.com/)
-
-### Show Tray Icon
-
-MicMute lives in the system tray. By default, Windows may hide it in the overflow area (▲). To keep it visible:
-
-**Settings → Personalization → Taskbar → Other system tray icons** → toggle **MicMute** on.
-
-### Run at Startup
-
-Right-click the tray icon → **Settings…** → check **Run at startup**.
+A lightweight system tray utility that lets you mute and unmute your microphone from anywhere using a hotkey or tray icon click. Works at the Windows audio level — affects all apps at once (Zoom, Discord, Teams, etc.).
 
 ## Features
 
-Mutes and unmutes your default microphone at the OS level using a global hotkey. Works across all applications — great for quickly muting during calls, streams, or recordings.
+- **Global hotkey**: `Win + Shift + A` (configurable) toggles mic mute system-wide
+- **Push-to-Talk mode**: Hold key to unmute, release to re-mute
+- **Deafen mode**: Mute both mic and speakers simultaneously (separate hotkey)
+- **Tray icon**: Green = active, Red = muted. Left-click to toggle.
+- **On-screen display**: Floating dark bubble above the taskbar shows mute state
+- **Mute Lock**: Prevents other apps from silently changing your mute state
+- **Mic source selection**: Pick which microphone to control
+- **Sound feedback**: Audible tone on mute/unmute (custom .wav support)
+- **Custom icons**: Replace default tray icons with your own .ico files
+- **Run at startup**: One-click toggle via Settings
+- **Startup state control**: Start muted, unmuted, or remember last session
+- **Explorer restart recovery**: Tray icon survives Explorer crashes
+- **Auto-detect**: Automatically reconnects when you plug in a new mic
 
-- **Hotkey**: `Win + Shift + A` (configurable, rebindable at runtime)
-- **Tray icon**: Green = mic active, Red = mic muted
-- **Left-click** tray icon to toggle
-- **Middle-click** tray icon to switch between Toggle and PTT modes
-- **Right-click** tray icon for full menu
-- **Sound feedback**: audible beep or custom WAV on toggle
-- **Icon flash**: tray icon flashes briefly on toggle for visibility
-- **On-screen display**: optional floating overlay shows MUTED/ACTIVE on toggle
-- **Modes**: Toggle and Push-to-Talk
-- **Mute lock**: prevent external apps from changing your mute state
-- **Deafen mode**: separate hotkey to mute mic + speakers simultaneously
-- **Settings GUI**: full settings window — no need to edit INI files manually
-- **Device selector**: pick which microphone to control from the tray menu
-- **Custom icons**: configurable .ico paths for colorblind accessibility
-- **Custom sounds**: replace default beep with your own .wav files
-- **Unmute on exit**: auto-unmutes mic when MicMute closes (prevents "dead mic")
-- **Auto-detect**: automatically reconnects when you plug in or switch microphones
-- **External sync**: tray icon stays accurate even when other apps change your mic state
+## Screenshots
 
-## Configuration
+| Active (Unmuted) | Muted | Tray Menu | Settings |
+|:---:|:---:|:---:|:---:|
+| ![Active](screenshots/micicon1.png) | ![Muted](screenshots/micicon2.png) | ![Menu](screenshots/micmutemenu.png) | ![Settings](screenshots/micmutesettings.png) |
 
-All settings are accessible through the **Settings GUI** (right-click tray → Settings…). Settings are stored in `MicMute.ini` (auto-created).
+## Requirements
+
+- Windows 10/11
+
+## Installation
+
+### Option 1: Download
+
+Grab the latest release from [Releases](https://github.com/itsnateai/MicMute/releases):
+
+| File | Size | Notes |
+|------|------|-------|
+| **MicMute.exe** | ~280 KB | Requires [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0) |
+| **MicMute-standalone.exe** | ~150 MB | No runtime needed, click and go |
+
+### Option 2: Build from source
+
+```bash
+git clone https://github.com/itsnateai/MicMute.git
+cd MicMute
+
+# Framework-dependent (~280KB, requires .NET 8 runtime)
+dotnet publish -c Release
+
+# Self-contained (~150MB, no runtime needed)
+dotnet publish -c Release --self-contained true
+```
+
+Output: `bin/Release/net8.0-windows/publish/MicMute.exe`
+
+## Usage
+
+### Modes
+
+**Toggle** (default): Press the hotkey to mute, press again to unmute.
+
+**Push-to-Talk**: Hold the hotkey to unmute. Release to re-mute. Switch via tray menu or middle-click the icon.
+
+**Deafen**: Assign a separate hotkey in Settings. Mutes both mic and speakers. Press again to restore both.
+
+### Tray Menu
+
+Right-click the tray icon for the full menu:
+- Toggle mute
+- Change hotkey (supports AHK syntax: `#` Win, `^` Ctrl, `!` Alt, `+` Shift)
+- Switch between Toggle and Push-to-Talk modes
+- Select mic source
+- Open Settings, Help, Sound Settings
+- Reinitialise mic (if device changed)
+
+## Customization
+
+Settings are stored in `MicMute.ini` (auto-created next to the exe):
 
 ```ini
 [General]
 Hotkey=#+a
 SoundFeedback=1
 Mode=toggle
-DeviceId=
-MuteLock=0
-MuteSound=
-UnmuteSound=
-IconMuted=
-IconActive=
 OSD_Enabled=0
 OSD_Duration=1500
-DeafenHotkey=
+MuteLock=0
 MiddleClickToggle=1
 StartMuted=no
+DeafenHotkey=
 ```
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `Hotkey` | `#+a` (Win+Shift+A) | Global mute toggle hotkey |
-| `SoundFeedback` | `1` | Audible beep on toggle (0 to disable) |
-| `Mode` | `toggle` | Hotkey mode: `toggle` or `push-to-talk` |
-| `DeviceId` | _(empty)_ | Specific mic device ID (empty = system default) |
-| `MuteLock` | `0` | Prevent external apps from changing mute state |
-| `MuteSound` | _(empty)_ | Custom .wav file path for mute sound (empty = beep) |
-| `UnmuteSound` | _(empty)_ | Custom .wav file path for unmute sound (empty = beep) |
-| `IconMuted` | _(empty)_ | Custom .ico path for muted icon (empty = mic_off.ico) |
-| `IconActive` | _(empty)_ | Custom .ico path for active icon (empty = mic_on.ico) |
-| `OSD_Enabled` | `0` | Show floating overlay on toggle |
-| `OSD_Duration` | `1500` | OSD display time in milliseconds (min 500) |
-| `DeafenHotkey` | _(empty)_ | Hotkey for deafen mode (empty = disabled) |
-| `MiddleClickToggle` | `1` | Middle-click tray to switch Toggle/PTT modes |
-| `StartMuted` | `no` | Startup behavior: `no`, `yes`, `unmuted`, or `last` |
-
-### Hotkey Syntax
-
-Modifier symbols: `#` = Win, `^` = Ctrl, `!` = Alt, `+` = Shift
-
-Examples:
-- `^!m` → Ctrl + Alt + M
-- `#+a` → Win + Shift + A
-- `F13` → F13 key
-
-If the hotkey string is invalid, MicMute falls back to tray-only mode (left-click the icon to toggle).
-
-You can also change the hotkey at runtime via Tray → **Hotkey: ...**.
-
-## Tray Menu
-
-| Item | Action |
-|------|--------|
-| Toggle Mute | Mute/unmute the mic |
-| Hotkey: ... | Shows current hotkey — click to rebind |
-| Mode → | Submenu: Toggle, Push-to-Talk |
-| Mic Source → | Submenu: available audio devices |
-| Settings… | Open Settings GUI |
-| Reinit Mic | Manually reconnect to audio device |
-| Sound Settings | Open Windows Sound Settings |
-| Exit | Close MicMute |
-
-### Modes
-
-- **Toggle** (default): Press the hotkey to flip mute on/off.
-- **Push-to-Talk**: Hold the hotkey to unmute. Release to re-mute. (30s safety timeout)
-
-Switch modes via the tray menu or middle-click the tray icon.
-
-### Deafen Mode
-
-Set a deafen hotkey in Settings to enable a separate hotkey that mutes both your microphone and speakers simultaneously. Press again to restore both to their previous state. The tray tooltip shows `[DEAFENED]` when active.
-
-### Mute Lock
-
-When enabled, MicMute prevents other applications from changing your mic mute state. If an app tries to unmute/mute your mic, MicMute immediately re-applies your chosen state.
-
-### On-Screen Display
-
-When enabled, a floating overlay briefly appears on screen showing **MUTED** (red) or **ACTIVE** (green) whenever the mute state changes. The OSD is click-through and semi-transparent. Appears above the taskbar on the primary monitor.
-
-### Custom Sounds
-
-Replace the default beep with your own `.wav` files. Set paths via Settings → Custom Files section. Falls back to beep if the file is missing or invalid.
-
-### Accessible Icons
-
-Set custom `.ico` file paths for colorblind-friendly alternatives via Settings → Custom Files. The default red/green icons can be difficult for the ~8% of males with red/green color deficiency.
-
-### Startup Behavior
-
-Control what happens to your mic when MicMute starts:
-- **Don't change** — leaves mic in its current state (default)
-- **Always muted** — forces mic to mute on startup
-- **Always unmuted** — forces mic to unmute on startup
-- **Remember last** — restores the previous session's mute state
+| Key | Default | Description |
+|-----|---------|-------------|
+| `Hotkey` | `#+a` | Main mute hotkey (AHK syntax) |
+| `SoundFeedback` | `1` | Play tone on mute/unmute |
+| `Mode` | `toggle` | `toggle` or `push-to-talk` |
+| `OSD_Enabled` | `0` | Show on-screen mute indicator |
+| `OSD_Duration` | `1500` | OSD display time in ms |
+| `MuteLock` | `0` | Prevent external apps from changing mute |
+| `MiddleClickToggle` | `1` | Middle-click tray to switch modes |
+| `StartMuted` | `no` | `no`, `yes`, `unmuted`, or `last` |
+| `DeafenHotkey` | *(empty)* | Hotkey for deafen mode |
+| `DeviceId` | *(empty)* | Specific mic device (empty = system default) |
+| `IconMuted` / `IconActive` | *(empty)* | Custom .ico file paths |
+| `MuteSound` / `UnmuteSound` | *(empty)* | Custom .wav file paths |
 
 ## How It Works
 
-MicMute uses Windows Core Audio COM APIs (`IAudioEndpointVolume`) to control the default capture device at the OS level. This means the mute applies system-wide — every application sees the mic as muted.
+MicMute uses the Windows Core Audio COM APIs (`IAudioEndpointVolume`) to control microphone mute state directly — no dependencies on any specific app. Global hotkeys are registered via `RegisterHotKey` and the tray icon is built using WinForms `NotifyIcon`.
 
-A background timer (every 5 seconds) monitors the audio endpoint to:
-- Auto-detect device changes (mic plugged/unplugged)
-- Sync the tray icon if another app changes the mute state
-- Enforce mute lock if enabled
+A 5-second periodic sync timer detects external mute changes, device hot-plug events, and enforces Mute Lock when enabled.
 
-## Important: OS-Level vs App-Level Mute
+## Project Structure
 
-MicMute mutes at the **operating system level**, which affects ALL applications simultaneously. Most VoIP apps (Zoom, Discord, Teams, etc.) also have their own mute buttons. Be aware:
-
-- If you mute in MicMute AND in your VoIP app, you'll need to unmute in **both** places
-- Some apps show "your mic is muted" warnings based on their own mute state, not the OS state
-- When in doubt, check both the MicMute tray icon and your app's mute indicator
-
-## Compilation
-
-To compile to a standalone `.exe` (no AutoHotkey installation needed):
-
-```bash
-MSYS_NO_PATHCONV=1 ./Ahk2Exe.exe /in MicMute.ahk /out MicMute.exe /icon mic_on.ico /compress 0 /silent
-```
-
-> **Note:** Use `/compress 0` — default compression triggers Windows Defender false positives.
-
-## Files
-
-| File | Purpose |
-|------|---------|
-| `MicMute.ahk` | Main script |
-| `mic_on.ico` | Tray icon — mic active (green). Embedded in compiled .exe |
-| `mic_off.ico` | Tray icon — mic muted (red). Embedded in compiled .exe |
-| `MicMute.ini` | User config (auto-created, gitignored) |
+| Path | Description |
+|------|-------------|
+| `MicMute.csproj` | .NET 8 project file |
+| `Program.cs` | Entry point — single-instance enforcement |
+| `TrayApp.cs` | Main app — tray icon, hotkeys, mute logic, menus |
+| `AudioManager.cs` | Core Audio COM interop — mute, enumerate, speaker control |
+| `Config.cs` | INI config reader/writer with hotkey parsing |
+| `OsdForm.cs` | On-screen display overlay (click-through, auto-dismiss) |
+| `SettingsDialog.cs` | Settings GUI |
+| `HotkeyDialog.cs` | Hotkey change dialog |
+| `HelpWindow.cs` | Help text window |
+| `NativeMethods.cs` | Win32 P/Invoke declarations |
+| `ShortcutHelper.cs` | Windows .lnk shortcut creation for startup |
+| `mic_on.ico` / `mic_off.ico` | Tray icons (embedded as resources) |
+| `legacy/MicMute.ahk` | Original AutoHotkey v2 script (archived) |
 
 ## License
 
