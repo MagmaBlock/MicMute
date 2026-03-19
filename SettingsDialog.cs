@@ -21,6 +21,7 @@ internal sealed class SettingsDialog : Form
 
     // Hotkeys
     private readonly TextBox _edtDeafenHK;
+    private string _capturedDeafenHK = "";
 
     // Custom files
     private readonly TextBox _edtIconMuted;
@@ -95,18 +96,46 @@ internal sealed class SettingsDialog : Form
         // ── Hotkeys ──
         AddSectionHeader("Hotkeys", leftMargin, ref y);
 
-        var deafenLabel = new Label { Text = "Global deafen hotkey:", AutoSize = true, Location = new Point(indent, y + 2) };
+        var deafenLabel = new Label { Text = "Deafen hotkey:", AutoSize = true, Location = new Point(indent, y + 2) };
         Controls.Add(deafenLabel);
+        _capturedDeafenHK = config.DeafenHotkey;
         _edtDeafenHK = new TextBox
         {
-            Text = config.DeafenHotkey,
-            Width = 130,
+            Text = string.IsNullOrEmpty(config.DeafenHotkey) ? "(press a key combo)" : Config.HotkeyToReadable(config.DeafenHotkey),
+            Width = 160,
+            ReadOnly = true,
+            BackColor = Color.White,
             Location = new Point(deafenLabel.Right + 8, y - 1),
         };
+        _edtDeafenHK.KeyDown += (_, e) =>
+        {
+            e.SuppressKeyPress = true;
+            if (e.KeyCode is Keys.ControlKey or Keys.ShiftKey or Keys.Menu or Keys.LWin or Keys.RWin)
+                return;
+
+            string prefix = "";
+            if (e.Modifiers.HasFlag(Keys.Control)) prefix += "^";
+            if (e.Modifiers.HasFlag(Keys.Alt)) prefix += "!";
+            if (e.Modifiers.HasFlag(Keys.Shift)) prefix += "+";
+            if ((NativeMethods.GetAsyncKeyState(0x5B) & 0x8000) != 0 ||
+                (NativeMethods.GetAsyncKeyState(0x5C) & 0x8000) != 0)
+                prefix = "#" + prefix;
+
+            string keyName = HotkeyDialog.KeyCodeToName(e.KeyCode);
+            if (string.IsNullOrEmpty(keyName)) return;
+
+            _capturedDeafenHK = prefix + keyName;
+            _edtDeafenHK.Text = Config.HotkeyToReadable(_capturedDeafenHK);
+        };
         Controls.Add(_edtDeafenHK);
+
+        var btnClearHK = new Button { Text = "Clear", Width = 45, Location = new Point(_edtDeafenHK.Right + 4, y - 1) };
+        btnClearHK.Click += (_, _) => { _capturedDeafenHK = ""; _edtDeafenHK.Text = "(none)"; };
+        Controls.Add(btnClearHK);
+
         var hkHintLabel = new Label
         {
-            Text = "AHK syntax: # = Win, ^ = Ctrl, ! = Alt, + = Shift",
+            Text = "Click the box and press your desired key combo",
             AutoSize = true,
             ForeColor = Color.FromArgb(0x88, 0x88, 0x88),
             Location = new Point(indent, y + 22),
@@ -181,7 +210,7 @@ internal sealed class SettingsDialog : Form
             try { File.Delete(startupPath); } catch { /* ignore */ }
 
         // Deafen hotkey
-        _config.DeafenHotkey = _edtDeafenHK.Text.Trim();
+        _config.DeafenHotkey = _capturedDeafenHK;
 
         // Custom files
         _config.IconMuted = _edtIconMuted.Text.Trim();
