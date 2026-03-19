@@ -53,50 +53,10 @@ internal sealed class SettingsDialog : Form
         int leftMargin = 16;
         int indent = 28;
 
-        // ── Behavior ──
-        AddSectionHeader("Behavior", leftMargin, ref y);
-
-        _chkSoundFeedback = AddCheckBox("Sound feedback on mute/unmute", indent, ref y, config.SoundFeedback);
-        _chkOsd = AddCheckBox("On-screen display bubble on mute/unmute", indent, ref y, config.OsdEnabled);
-
-        // OSD duration
-        var durLabel = new Label { Text = "Duration (ms):", AutoSize = true, ForeColor = Color.FromArgb(0x88, 0x88, 0x88), Location = new Point(48, y + 2) };
-        Controls.Add(durLabel);
-        _edtOsdDuration = new TextBox { Text = config.OsdDuration.ToString(), Width = 55, Location = new Point(durLabel.Right + 6, y - 1) };
-        Controls.Add(_edtOsdDuration);
-        y += 28;
-
-        _chkMuteLock = AddCheckBox("Mute Lock (prevent external apps from changing mute state)", indent, ref y, config.MuteLock);
-        _chkMiddleClick = AddCheckBox("Middle-click tray icon to toggle Toggle/PTT mode", indent, ref y, config.MiddleClickToggle);
-
-        string startupPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.Startup), "MicMute.lnk");
-        _chkRunAtStartup = AddCheckBox("Run at startup", indent, ref y, File.Exists(startupPath));
-
-        // On startup dropdown
-        var startLabel = new Label { Text = "On startup:", AutoSize = true, Location = new Point(indent, y + 2) };
-        Controls.Add(startLabel);
-        _ddlStartMuted = new ComboBox
-        {
-            DropDownStyle = ComboBoxStyle.DropDownList,
-            Width = 130,
-            Location = new Point(startLabel.Right + 8, y - 1),
-        };
-        _ddlStartMuted.Items.AddRange(new[] { "Don't change", "Always muted", "Always unmuted", "Remember last" });
-        _ddlStartMuted.SelectedIndex = config.StartMuted switch
-        {
-            "yes" => 1,
-            "unmuted" => 2,
-            "last" => 3,
-            _ => 0,
-        };
-        Controls.Add(_ddlStartMuted);
-        y += 30;
-
         // ── Hotkeys ──
         AddSectionHeader("Hotkeys", leftMargin, ref y);
 
-        var deafenLabel = new Label { Text = "Deafen hotkey:", AutoSize = true, Location = new Point(indent, y + 2) };
+        var deafenLabel = new Label { Text = "Deafen Mute hotkey:", AutoSize = true, Location = new Point(indent, y + 2) };
         Controls.Add(deafenLabel);
         _capturedDeafenHK = config.DeafenHotkey;
         _edtDeafenHK = new TextBox
@@ -142,6 +102,46 @@ internal sealed class SettingsDialog : Form
         };
         Controls.Add(hkHintLabel);
         y += 48;
+
+        // ── Behavior ──
+        AddSectionHeader("Behavior", leftMargin, ref y);
+
+        _chkSoundFeedback = AddCheckBox("Sound feedback on mute/unmute", indent, ref y, config.SoundFeedback);
+        _chkOsd = AddCheckBox("On-screen display bubble on mute/unmute", indent, ref y, config.OsdEnabled);
+
+        // OSD duration
+        var durLabel = new Label { Text = "Duration (ms):", AutoSize = true, ForeColor = Color.FromArgb(0x88, 0x88, 0x88), Location = new Point(48, y + 2) };
+        Controls.Add(durLabel);
+        _edtOsdDuration = new TextBox { Text = config.OsdDuration.ToString(), Width = 55, Location = new Point(durLabel.Right + 6, y - 1) };
+        Controls.Add(_edtOsdDuration);
+        y += 28;
+
+        _chkMuteLock = AddCheckBox("Mute Lock (prevent external apps from changing mute state)", indent, ref y, config.MuteLock);
+        _chkMiddleClick = AddCheckBox("Middle-click tray icon to toggle Toggle/PTT mode", indent, ref y, config.MiddleClickToggle);
+
+        string startupPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.Startup), "MicMute.lnk");
+        _chkRunAtStartup = AddCheckBox("Run at startup", indent, ref y, File.Exists(startupPath));
+
+        // On startup dropdown
+        var startLabel = new Label { Text = "On startup:", AutoSize = true, Location = new Point(indent, y + 2) };
+        Controls.Add(startLabel);
+        _ddlStartMuted = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Width = 130,
+            Location = new Point(startLabel.Right + 8, y - 1),
+        };
+        _ddlStartMuted.Items.AddRange(new[] { "Don't change", "Always muted", "Always unmuted", "Remember last" });
+        _ddlStartMuted.SelectedIndex = config.StartMuted switch
+        {
+            "yes" => 1,
+            "unmuted" => 2,
+            "last" => 3,
+            _ => 0,
+        };
+        Controls.Add(_ddlStartMuted);
+        y += 30;
 
         // ── Custom Files ──
         AddSectionHeader("Custom Files", leftMargin, ref y);

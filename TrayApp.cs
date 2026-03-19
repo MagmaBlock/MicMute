@@ -273,8 +273,18 @@ internal sealed class TrayApp : Form
 
     private static void PlayToneSequence(bool muted)
     {
-        // kernel32.Beep is synchronous but only 80ms — acceptable brief block
-        NativeMethods.Beep(muted ? 587u : 880u, 80);
+        if (muted)
+        {
+            // Descending two-tone: high → low = muted
+            NativeMethods.Beep(880, 80);
+            NativeMethods.Beep(587, 80);
+        }
+        else
+        {
+            // Ascending two-tone: low → high = unmuted
+            NativeMethods.Beep(587, 80);
+            NativeMethods.Beep(880, 80);
+        }
     }
 
     private static void PlayModeChirp(string mode)
