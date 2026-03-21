@@ -34,12 +34,7 @@ A lightweight system tray utility that lets you mute and unmute your microphone 
 
 ### Option 1: Download
 
-Grab the latest release from [Releases](https://github.com/itsnateai/MicMute/releases):
-
-| File | Size | Notes |
-|------|------|-------|
-| **MicMute.exe** | ~280 KB | Requires [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0) |
-| **MicMute-standalone.exe** | ~150 MB | No runtime needed, click and go |
+Grab **[MicMute.exe](https://github.com/itsnateai/MicMute/releases/latest)** from the latest release — single file, self-contained, no .NET runtime needed.
 
 ### Option 2: Build from source
 
