@@ -42,7 +42,20 @@ A lightweight system tray utility that lets you mute and unmute your microphone 
 
 Grab **[MicMute.exe](https://github.com/itsnateai/MicMute/releases/latest)** from the latest release — single file, self-contained, no .NET runtime needed.
 
-### Option 2: Build from source
+### Option 2: Scoop (coming soon)
+
+```powershell
+scoop bucket add extras
+scoop install micmute
+```
+
+### Option 3: WinGet (coming soon)
+
+```powershell
+winget install itsnateai.MicMute
+```
+
+### Option 4: Build from source
 
 ```bash
 git clone https://github.com/itsnateai/MicMute.git
