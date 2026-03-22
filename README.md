@@ -1,5 +1,11 @@
 # MicMute
 
+[![GitHub Release](https://img.shields.io/github/v/release/itsnateai/MicMute)](https://github.com/itsnateai/MicMute/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![.NET 8](https://img.shields.io/badge/.NET-8.0-purple)](https://dotnet.microsoft.com/)
+[![Windows](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D6)](https://github.com/itsnateai/MicMute)
+[![GitHub Downloads](https://img.shields.io/github/downloads/itsnateai/MicMute/total)](https://github.com/itsnateai/MicMute/releases)
+
 Global hotkey microphone mute/unmute for Windows.
 
 A lightweight system tray utility that lets you mute and unmute your microphone from anywhere using a hotkey or tray icon click. Works at the Windows audio level — affects all apps at once (Zoom, Discord, Teams, etc.).
