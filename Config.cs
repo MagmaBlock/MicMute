@@ -9,7 +9,7 @@ namespace MicMute;
 /// </summary>
 internal sealed class Config
 {
-    public const string Version = "2.0.1";
+    public const string Version = "2.0.2";
 
     // Settings with defaults
     public string Hotkey = "#+a";
