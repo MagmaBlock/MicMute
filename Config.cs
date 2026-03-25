@@ -9,7 +9,7 @@ namespace MicMute;
 /// </summary>
 internal sealed class Config
 {
-    public const string Version = "2.0.2";
+    public static readonly string Version = typeof(Config).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
 
     // Settings with defaults
     public string Hotkey = "#+a";
