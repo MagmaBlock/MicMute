@@ -110,8 +110,9 @@ internal sealed class TrayApp : Form
         RegisterMainHotkey();
         RegisterDeafenHotkey();
 
-        // Periodic sync timer — 5 seconds
-        _syncTimer = new System.Windows.Forms.Timer { Interval = 5000 };
+        // Periodic sync timer — 15s to detect mic plug/unplug and external mute changes.
+        // Hotkey actions sync immediately, so this doesn't affect responsiveness.
+        _syncTimer = new System.Windows.Forms.Timer { Interval = 15000 };
         _syncTimer.Tick += OnSyncTick;
         _syncTimer.Start();
 
