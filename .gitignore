@@ -40,3 +40,6 @@ CLAUDE.md
 *.bak
 *.orig
 *.rej
+
+# Build output
+publish/
