@@ -5,7 +5,7 @@ namespace MicMute;
 internal static class Program
 {
     [STAThread]
-    static void Main()
+    static void Main(string[] args)
     {
         // Single-instance enforcement: kill previous instances
         string processName = Path.GetFileNameWithoutExtension(Environment.ProcessPath ?? "MicMute");
@@ -20,8 +20,15 @@ internal static class Program
             }
         }
 
+        bool isAfterUpdate = args.Contains("--after-update");
+        UpdateDialog.CleanupUpdateArtifacts();
+
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
+
+        if (isAfterUpdate)
+            UpdateDialog.ShowUpdateToast();
+
         Application.Run(new TrayApp());
     }
 }

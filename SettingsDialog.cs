@@ -164,24 +164,32 @@ internal sealed class SettingsDialog : Form
         };
         Controls.Add(btnGitHub);
 
-        var btnHelp = new Button { Text = "Help", Width = 55, Location = new Point(btnGitHub.Right + 6, y) };
+        var btnUpdate = new Button { Text = "Update", Width = 65, Location = new Point(btnGitHub.Right + 6, y) };
+        btnUpdate.Click += (_, _) =>
+        {
+            using var dlg = new UpdateDialog();
+            dlg.ShowDialog(this);
+        };
+        Controls.Add(btnUpdate);
+
+        var btnHelp = new Button { Text = "Help", Width = 55, Location = new Point(btnUpdate.Right + 6, y) };
         btnHelp.Click += (_, _) => HelpWindow.ShowInstance();
         Controls.Add(btnHelp);
 
-        var btnOK = new Button { Text = "OK", Width = 80, Location = new Point(170, y) };
+        var btnOK = new Button { Text = "OK", Width = 80, Location = new Point(234, y) };
         btnOK.Click += (_, _) => { ApplySettings(); Close(); };
         Controls.Add(btnOK);
 
-        var btnApply = new Button { Text = "Apply", Width = 80, Location = new Point(258, y) };
+        var btnApply = new Button { Text = "Apply", Width = 80, Location = new Point(322, y) };
         btnApply.Click += (_, _) => ApplySettings();
         Controls.Add(btnApply);
 
-        var btnCancel = new Button { Text = "Cancel", Width = 80, Location = new Point(346, y) };
+        var btnCancel = new Button { Text = "Cancel", Width = 80, Location = new Point(410, y) };
         btnCancel.Click += (_, _) => Close();
         Controls.Add(btnCancel);
         CancelButton = btnCancel;
 
-        ClientSize = new Size(440, y + 38);
+        ClientSize = new Size(498, y + 38);
     }
 
     private void ApplySettings()
