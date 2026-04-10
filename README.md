@@ -144,7 +144,6 @@ A 5-second periodic sync timer detects external mute changes, device hot-plug ev
 | `NativeMethods.cs` | Win32 P/Invoke declarations |
 | `ShortcutHelper.cs` | Windows .lnk shortcut creation for startup |
 | `mic_on.ico` / `mic_off.ico` | Tray icons (embedded as resources) |
-| `legacy/MicMute.ahk` | Original AutoHotkey v2 script (archived) |
 
 ## License
 
