@@ -19,7 +19,7 @@ Red tray icon = mic is muted
 ——— BASIC USAGE ———————————————————
 
 • Left-click the tray icon to toggle mute.
-• Press your hotkey (default: Win+Shift+A) to toggle from anywhere.
+• Press your hotkey (default: Win+Shift+Ctrl+A) to toggle from anywhere.
 • Right-click the tray icon for the full menu (change mode, pick a mic, open settings, etc.).
 • Change your hotkey anytime via Tray → ""Hotkey: ..."" in the menu.
 

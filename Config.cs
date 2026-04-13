@@ -12,7 +12,7 @@ internal sealed class Config
     public static readonly string Version = typeof(Config).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
 
     // Settings with defaults
-    public string Hotkey = "#+a";
+    public string Hotkey = "#^+a";
     public bool SoundFeedback = true;
     public string Mode = "toggle"; // "toggle" or "push-to-talk"
     public string DeviceId = "";

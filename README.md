@@ -12,7 +12,7 @@ A lightweight system tray utility that lets you mute and unmute your microphone 
 
 ## Features
 
-- **Global hotkey**: `Win + Shift + A` (configurable) toggles mic mute system-wide
+- **Global hotkey**: `Win + Shift + Ctrl + A` (configurable) toggles mic mute system-wide
 - **Push-to-Talk mode**: Hold key to unmute, release to re-mute
 - **Deafen mode**: Mute both mic and speakers simultaneously (separate hotkey)
 - **Tray icon**: Green = active, Red = muted. Left-click to toggle.
@@ -89,7 +89,7 @@ Settings are stored in `MicMute.ini` (auto-created next to the exe):
 
 ```ini
 [General]
-Hotkey=#+a
+Hotkey=#^+a
 SoundFeedback=1
 Mode=toggle
 OSD_Enabled=0
@@ -102,7 +102,7 @@ DeafenHotkey=
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `Hotkey` | `#+a` | Main mute hotkey (AHK syntax) |
+| `Hotkey` | `#^+a` | Main mute hotkey (AHK syntax) |
 | `SoundFeedback` | `1` | Play tone on mute/unmute |
 | `Mode` | `toggle` | `toggle` or `push-to-talk` |
 | `OSD_Enabled` | `0` | Show on-screen mute indicator |
