@@ -7,6 +7,42 @@ namespace MicMute;
 /// </summary>
 internal static class ShortcutHelper
 {
+    /// <summary>
+    /// If a startup shortcut exists but points to a stale exe path, update it.
+    /// Called early in app startup so winget/moved installs auto-heal.
+    /// </summary>
+    public static void ValidateStartupShortcut()
+    {
+        var shortcutPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.Startup), "MicMute.lnk");
+
+        if (!File.Exists(shortcutPath)) return; // No shortcut = nothing to validate
+
+        try
+        {
+            var shellType = Type.GetTypeFromProgID("WScript.Shell");
+            if (shellType == null) return;
+            dynamic shell = Activator.CreateInstance(shellType)!;
+            try
+            {
+                dynamic shortcut = shell.CreateShortcut(shortcutPath);
+                try
+                {
+                    var targetPath = (string)shortcut.TargetPath;
+                    var currentPath = Environment.ProcessPath ?? "";
+                    if (!targetPath.Equals(currentPath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Stale — update it
+                        CreateShortcut(shortcutPath, currentPath);
+                    }
+                }
+                finally { Marshal.FinalReleaseComObject(shortcut); }
+            }
+            finally { Marshal.FinalReleaseComObject(shell); }
+        }
+        catch { /* Silently ignore — startup validation is best-effort */ }
+    }
+
     public static void CreateShortcut(string shortcutPath, string targetPath)
     {
         try

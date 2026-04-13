@@ -48,11 +48,39 @@ internal sealed class Config
 
     public Config()
     {
-        string dir = Path.GetDirectoryName(Environment.ProcessPath ?? "")
+        _iniPath = ResolveIniPath();
+    }
+
+    private static string ResolveIniPath()
+    {
+        const string iniName = "MicMute.ini";
+
+        string exeDir = Path.GetDirectoryName(Environment.ProcessPath ?? "")
             ?? AppDomain.CurrentDomain.BaseDirectory;
-        if (string.IsNullOrEmpty(dir))
-            dir = AppDomain.CurrentDomain.BaseDirectory;
-        _iniPath = Path.Combine(dir, "MicMute.ini");
+        if (string.IsNullOrEmpty(exeDir))
+            exeDir = AppDomain.CurrentDomain.BaseDirectory;
+
+        // 1. Existing ini next to exe — backwards compat for portable users
+        string portablePath = Path.Combine(exeDir, iniName);
+        if (File.Exists(portablePath))
+            return portablePath;
+
+        // 2. Existing ini in %APPDATA%\MicMute\
+        string appDataDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MicMute");
+        string appDataPath = Path.Combine(appDataDir, iniName);
+        if (File.Exists(appDataPath))
+            return appDataPath;
+
+        // 3. Winget install — create in %APPDATA%\MicMute\
+        if (UpdateDialog.IsWingetManaged())
+        {
+            Directory.CreateDirectory(appDataDir);
+            return appDataPath;
+        }
+
+        // 4. Traditional portable — create next to exe
+        return portablePath;
     }
 
     public void Load()
@@ -68,10 +96,10 @@ internal sealed class Config
         if (Mode != "toggle" && Mode != "push-to-talk")
             Mode = "toggle";
         DeviceId = ReadIni("DeviceId", "").Trim();
-        IconMuted = ReadIni("IconMuted", "").Trim();
-        IconActive = ReadIni("IconActive", "").Trim();
-        MuteSound = ReadIni("MuteSound", "").Trim();
-        UnmuteSound = ReadIni("UnmuteSound", "").Trim();
+        IconMuted = SanitizePath(ReadIni("IconMuted", "").Trim());
+        IconActive = SanitizePath(ReadIni("IconActive", "").Trim());
+        MuteSound = SanitizePath(ReadIni("MuteSound", "").Trim());
+        UnmuteSound = SanitizePath(ReadIni("UnmuteSound", "").Trim());
         MuteLock = ReadIni("MuteLock", "0") == "1";
         OsdEnabled = ReadIni("OSD_Enabled", "0") == "1";
         if (int.TryParse(ReadIni("OSD_Duration", "1500"), out int dur))
@@ -227,6 +255,16 @@ internal sealed class Config
             "NUMPADENTER" => 0x0D, // same VK, distinguishable by extended flag
             _ => 0,
         };
+    }
+
+    /// <summary>
+    /// Rejects UNC paths to prevent NTLM credential leaks via SMB auth.
+    /// </summary>
+    private static string SanitizePath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return "";
+        if (path.StartsWith(@"\\")) return ""; // Block UNC paths (NTLM leak risk)
+        return path;
     }
 
     private string ReadIni(string key, string defaultValue)

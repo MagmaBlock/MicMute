@@ -136,6 +136,19 @@ internal sealed class UpdateDialog : Form
     private async Task CheckForUpdateAsync()
     {
         _cts = new CancellationTokenSource();
+
+        if (IsWingetManaged())
+        {
+            _marqueeTimer.Stop();
+            _progressOuter.Visible = false;
+            _lblStatus.Text = "Managed by winget";
+            _lblDetail.Text = "Use:  winget upgrade itsnateai.MicMute";
+            _btnAction.Visible = false;
+            _btnCancel.Text = "OK";
+            _btnCancel.Location = new Point(170, 112);
+            return;
+        }
+
         _marqueeTimer.Start();
 
         try
@@ -259,6 +272,14 @@ internal sealed class UpdateDialog : Form
 
         try
         {
+            // Validate download URL origin before fetching
+            if (!_downloadUrl.StartsWith("https://github.com/itsnateai/", StringComparison.OrdinalIgnoreCase) &&
+                !_downloadUrl.StartsWith("https://objects.githubusercontent.com/", StringComparison.OrdinalIgnoreCase))
+            {
+                ShowError("Update failed: download URL is not from the expected source.", _downloadUrl ?? "(null)");
+                return;
+            }
+
             if (!await DownloadFileAsync(_downloadUrl!, newPath))
                 return;
 
@@ -382,6 +403,10 @@ internal sealed class UpdateDialog : Form
     }
 
     // ─── Static Helpers (called from Program.cs) ────────────────
+
+    /// <summary>Returns true if the app is installed via winget (portable package).</summary>
+    internal static bool IsWingetManaged() =>
+        (Environment.ProcessPath ?? "").Contains(@"Microsoft\WinGet\Packages", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Clean up .old/.new artifacts from a previous update.</summary>
     internal static void CleanupUpdateArtifacts()

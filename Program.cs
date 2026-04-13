@@ -1,5 +1,3 @@
-using System.Diagnostics;
-
 namespace MicMute;
 
 internal static class Program
@@ -7,21 +5,12 @@ internal static class Program
     [STAThread]
     static void Main(string[] args)
     {
-        // Single-instance enforcement: kill previous instances
-        string processName = Path.GetFileNameWithoutExtension(Environment.ProcessPath ?? "MicMute");
-        foreach (var p in Process.GetProcessesByName(processName))
-        {
-            using (p)
-            {
-                if (p.Id != Environment.ProcessId)
-                {
-                    try { p.Kill(); } catch { /* already exiting */ }
-                }
-            }
-        }
+        // Single-instance: hold mutex for lifetime (serializes startup)
+        using var mutex = new Mutex(true, @"Global\MicMute_SingleInstance", out _);
 
         bool isAfterUpdate = args.Contains("--after-update");
         UpdateDialog.CleanupUpdateArtifacts();
+        ShortcutHelper.ValidateStartupShortcut();
 
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
