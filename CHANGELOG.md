@@ -1,5 +1,7 @@
 # Changelog
 
+*LTR — Long-Term Release. Feature-complete; maintenance-only updates.*
+
 All notable changes to MicMute are documented here.
 
 ## [2.0.0] - 2026-03-18

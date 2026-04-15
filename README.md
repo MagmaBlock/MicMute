@@ -1,5 +1,7 @@
 # MicMute
 
+*LTR — Long-Term Release. Feature-complete; maintenance-only updates.*
+
 [![GitHub Release](https://img.shields.io/github/v/release/itsnateai/MicMute)](https://github.com/itsnateai/MicMute/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![.NET 8](https://img.shields.io/badge/.NET-8.0-purple)](https://dotnet.microsoft.com/)
