@@ -1,6 +1,6 @@
 # MicMute
 
-*LTR — Long-Term Release. Feature-complete; maintenance-only updates.*
+*LTR — Long-Term Release · one-click self-update built in.*
 
 [![GitHub Release](https://img.shields.io/github/v/release/itsnateai/MicMute)](https://github.com/itsnateai/MicMute/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
