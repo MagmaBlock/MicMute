@@ -4,6 +4,23 @@
 
 All notable changes to MicMute are documented here.
 
+## [2.1.4] - 2026-04-16
+
+### Fixed
+- **Duplicate tray icons when launched twice** — a second launch now exits cleanly instead of spawning a second icon that fought with the first over the hotkey and settings file.
+- **Punctuation-key hotkeys now work** — binds like Shift+`\`, Ctrl+`]`, `;`, `'`, `,`, `.`, `/`, `-`, `=`, `` ` `` register correctly. Previously these silently failed and dropped you into tray-only mode.
+- **Keep your old hotkey if a new one won't register** — if you pick a combination Windows refuses, MicMute now rolls back to your previous working hotkey instead of leaving you with nothing.
+- **Update integrity check is now enforced** — when a release ships with checksums, the downloaded update is verified before installing. Anything that can't be verified is rejected.
+- **Push-to-talk no longer gets stuck unmuted** — re-binding the hotkey while holding the key now cleans up the poll instead of leaving the mic open.
+
+### Added
+- **Log file for troubleshooting** — MicMute keeps a small rolling log at `%LOCALAPPDATA%\MicMute\micmute.log` capturing errors, update activity, and startup events. Helpful if something misbehaves after a Windows update or device change.
+- **Crash-resistant tray** — unexpected errors in background timers now get logged instead of taking the tray down.
+
+### Changed
+- **Release pipeline now publishes a `SHA256SUMS` asset** alongside `MicMute.exe` so the self-update flow can verify downloads.
+- **GitHub Actions pinned to specific commits** so the release build is reproducible.
+
 ## [2.0.0] - 2026-03-18
 
 ### New Features
