@@ -44,11 +44,14 @@ A lightweight system tray utility that lets you mute and unmute your microphone 
 
 Grab **[MicMute.exe](https://github.com/itsnateai/MicMute/releases/latest)** from the latest release — single file, self-contained, no .NET runtime needed.
 
-### Option 2: WinGet (coming soon)
+### Option 2: WinGet (recommended)
 
 ```powershell
 winget install itsnateai.MicMute
+winget upgrade itsnateai.MicMute   # later, to update
 ```
+
+WinGet installs stay current automatically. The in-app **Update** button detects WinGet installs and points you back at `winget upgrade` instead of trying to overwrite the managed binary.
 
 ### Option 3: Build from source
 
@@ -57,13 +60,17 @@ git clone https://github.com/itsnateai/MicMute.git
 cd MicMute
 
 # Framework-dependent (~280KB, requires .NET 8 runtime)
-dotnet publish -c Release
+dotnet publish -c Release -r win-x64
 
-# Self-contained (~150MB, no runtime needed)
-dotnet publish -c Release --self-contained true
+# Self-contained single-file (~147MB, no runtime needed) — matches the release exe
+dotnet publish -c Release --self-contained true -r win-x64 -p:PublishSingleFile=true
 ```
 
-Output: `bin/Release/net8.0-windows/publish/MicMute.exe`
+Output: `bin/Release/net8.0-windows/win-x64/publish/MicMute.exe`
+
+### Self-update integrity
+
+Releases publish a `SHA256SUMS` file alongside the exe. The in-app **Update** button downloads it, verifies the hash, and fails closed if anything is missing or doesn't match. Unverified updates never land on disk.
 
 ## Usage
 
