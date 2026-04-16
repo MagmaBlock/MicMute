@@ -24,37 +24,34 @@ All notable changes to MicMute are documented here.
 ## [2.0.0] - 2026-03-18
 
 ### New Features
-- **Complete C# rewrite** — ported from AutoHotkey v2 to C# .NET 8 WinForms for better maintainability and performance
-- All features from v1.8.3 preserved: toggle/PTT modes, deafen, mute lock, OSD, sound feedback, custom icons, device selection, hotkey customization, startup control
+- **Complete C# rewrite** — ported from AutoHotkey v2 to C# .NET 8 WinForms for better maintainability and performance.
+- All features from v1.8.3 preserved: toggle/PTT modes, deafen, mute lock, OSD, sound feedback, custom icons, device selection, hotkey customization, startup control.
 
 ### Code Quality
-- Proper resource disposal throughout (COM handles, GDI objects, fonts, menu items)
-- Zero-allocation hot paths (sync timer, flash timer)
-- Click-through OSD overlay with Win11 rounded corners
-- Lazy-loaded device menu for snappy tray interaction
-- Singleton dialogs (settings, help) prevent duplicate windows
+- No memory creep over long sessions.
+- Snappier tray — no hitches when opening menus or flashing the icon on toggle.
+- Click-through OSD overlay with Win11 rounded corners.
+- Settings and Help windows never open twice if you click the menu rapidly.
 
 ### Removed
-- AutoHotkey dependency — runs on .NET 8 runtime or as a standalone exe
-- Original AHK script moved to `legacy/` folder
+- AutoHotkey dependency — runs on .NET 8 runtime or as a standalone exe.
+- Original AHK script moved to `legacy/` folder.
 
 ## [1.8.3] - 2026-03-13
 
 ### Fixed
-- **Mute lock debounce broken in SyncMuteState (P1)** — `g_lockDebounce` was not in the `global` declaration of `SyncMuteState()`, causing the mute lock debounce (infinite toggle war protection) to silently fail on every 5s sync cycle. The debounce flag was written to a local variable and discarded. Same class of AHK v2 scoping bug as below.
-- **Mute lock debounce broken in ToggleDeafen (P1)** — `g_lockDebounce` was not in the `global` declaration of `ToggleDeafen()`, causing a local shadow. Mute lock debounce didn't propagate when exiting deafen mode.
-- **Header version mismatch** — file header said v1.8.0 while `g_version` was v1.8.1. Both now v1.8.3.
-- **Hot-path allocation in `InitMicEndpoint`** — three `Buffer(16)` GUID allocations occurred on every call. GUID buffers are now `static` and initialized once.
-- **Repeated allocation in `EnumCaptureDevices`** — GUID and PKEY buffers now `static` with one-time init.
-- **PopulateDeviceMenu error safety** — COM device enumeration wrapped in `try` to prevent errors from silently breaking the tray notification message handler.
-- **FixIniEncoding data loss risk** — `FileDelete` before `FileAppend` could lose INI on write failure. Now writes to temp file first, then swaps.
-- **Cleanup COM pointer not nulled** — `g_pAEV` not set to 0 after `ObjRelease` in `Cleanup()`. Defensive null for safety.
+- **Mute-lock no longer gets stuck in a toggle war** — the protection that stops other apps from fighting MicMute over your mic state now actually engages during the background sync and when you exit deafen mode.
+- **Header version matches the real version** — the About text and the tooltip now agree on which build you're running.
+- **Snappier startup and faster device menu** — initializing the mic and listing capture devices no longer does redundant work.
+- **Menu never silently breaks if a device enumeration errors** — the tray stays responsive even if Windows returns an error while listing mics.
+- **Settings file survives a sudden power loss** — preferences are written safely so an unexpected shutdown mid-save can't blank your config.
+- **Reliability improvements to shutdown cleanup.**
 
 ### Added
-- **Explorer restart recovery** — tray icon re-registers automatically when Explorer crashes/restarts via `TaskbarCreated` window message handler. Previously the tray icon was permanently lost.
+- **Tray icon recovers after Explorer restarts** — if Explorer crashes or restarts, the MicMute icon comes back automatically instead of vanishing until you relaunch.
 
 ### Removed
-- **Dead deprecated globals** — removed `g_ledIndicator` and `g_ledInitialState` (LED sync was removed in v1.7.0, these were unused remnants) and associated stale comments.
+- **Internal cleanup** — dead remnants from the old LED-sync feature removed.
 
 ## [1.8.1] - 2026-03-12
 
@@ -104,11 +101,11 @@ All notable changes to MicMute are documented here.
 - **Browse/Clear buttons** — custom icon and sound file paths use Browse/Clear buttons with filename labels instead of raw Edit boxes.
 
 ### Fixed
-- **LoadConfig/SaveConfig `global` declarations** — functions had incomplete global lists causing settings (especially StartMuted) to silently fail to save/load. Fixed with bare `global` statement.
-- **Middle-click crash** — tray icon middle-click caused 0xc0000005 access violation after ~5 clicks. Fixed ClearTrayHover timer and added try-catch around ComCall in AdjustMicVolume.
-- **Middle-click not working until right-click** — tray hover timer was too short (300ms). Increased to 1500ms.
-- **PTT→Toggle mode switch** — hotkey still acted as PTT after switching modes via right-click menu until script was restarted. Fixed by properly re-registering hotkey on mode change.
-- **Device name truncation** — long microphone names in the Mic Source tray submenu expanded the context menu excessively. Names now truncated at 40 characters.
+- **Settings now actually save** — several options (especially the "start muted" preference) were silently failing to save. They persist correctly now.
+- **No more crash on rapid middle-clicks** — middle-clicking the tray icon a few times in a row no longer crashes MicMute.
+- **Middle-click works on the first try** — previously it only worked after you'd right-clicked the tray icon first.
+- **Switching PTT to Toggle takes effect immediately** — the hotkey now switches cleanly instead of staying in PTT mode until restart.
+- **Long device names no longer blow out the menu** — microphone names in the Mic Source submenu are truncated at 40 characters.
 
 ### Removed
 - **LED sync (F-16)** — keyboard LED indicator feature removed entirely. Was unreliable and interfered with actual key function (CapsLock, ScrollLock, NumLock).
@@ -159,11 +156,10 @@ All notable changes to MicMute are documented here.
 ## [1.1.0] - 2026-03-08
 
 ### Fixed
-- **P0-01**: Script no longer crashes on startup if no mic is connected — starts in degraded state with recovery via tray menu
-- **P0-02**: GetMute COM calls now check HRESULT — stale device no longer causes incorrect mute state
-- **P0-03**: Invalid hotkey string no longer crashes on startup — falls back to tray-only mode with error message
-- **P1-04**: Documented the Sleep(150) delay before SyncTray (tray icon registration timing)
-- **P1-06**: Replaced ternary operators with if/else for TraySetIcon calls
+- **No crash at startup if no mic is connected** — MicMute now starts in a degraded state and lets you recover from the tray menu once you plug a mic in.
+- **Tray icon no longer shows the wrong mute state** when a device has gone stale — the icon now accurately reflects your actual mic state.
+- **Invalid hotkey in config no longer crashes at startup** — MicMute falls back to tray-only mode with an error message instead.
+- Internal refactor for maintainability.
 
 ### Added
 - **P1-01**: Auto-detect mic plug/unplug — periodic check reconnects automatically without user intervention
