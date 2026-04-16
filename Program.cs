@@ -5,6 +5,11 @@ internal static class Program
     [STAThread]
     static void Main(string[] args)
     {
+        // Install FIRST so any crash before mutex acquisition (rare: locked-down
+        // Global\ namespace ACLs, OOM at startup, COM subsystem failure) still
+        // leaves a log record instead of dying silently.
+        InstallGlobalExceptionHandlers();
+
         bool isAfterUpdate = args.Contains("--after-update");
 
         // Single-instance: acquire ownership explicitly via WaitOne so a duplicate
@@ -26,7 +31,6 @@ internal static class Program
         if (!acquired)
             return;
 
-        InstallGlobalExceptionHandlers();
         Log.Info($"MicMute starting (afterUpdate={isAfterUpdate})");
 
         try

@@ -4,6 +4,11 @@
 
 All notable changes to MicMute are documented here.
 
+## [2.1.5] - 2026-04-16
+
+### Fixed
+- **Crash logs capture the earliest startup errors** — the global error-handling and logging is now the very first thing MicMute does at launch, so the rare failure that happens in the first millisecond of startup still leaves a record in the log file instead of disappearing silently.
+
 ## [2.1.4] - 2026-04-16
 
 ### Fixed
