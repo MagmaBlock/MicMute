@@ -271,6 +271,9 @@ internal sealed class UpdateDialog : Form
 
         _cts?.Dispose();
         _cts = new CancellationTokenSource();
+        // Capture once — if the field is reassigned by a concurrent click sequence,
+        // our awaits stay pinned to the token we started with.
+        var ct = _cts.Token;
         var exePath = Environment.ProcessPath
             ?? throw new InvalidOperationException("Cannot determine executable path.");
         var newPath = exePath + ".new";
@@ -286,7 +289,7 @@ internal sealed class UpdateDialog : Form
                 return;
             }
 
-            if (!await DownloadFileAsync(_downloadUrl!, newPath))
+            if (!await DownloadFileAsync(_downloadUrl!, newPath, ct))
                 return;
 
             // Verify SHA256 hash if the release includes a SHA256SUMS file
@@ -295,7 +298,7 @@ internal sealed class UpdateDialog : Form
                 _lblStatus.Text = "Verifying integrity...";
                 try
                 {
-                    var hashContent = await _http.GetStringAsync(_hashFileUrl, _cts!.Token);
+                    var hashContent = await _http.GetStringAsync(_hashFileUrl, ct);
                     string expectedHash = null;
                     foreach (var line in hashContent.Split('\n', StringSplitOptions.RemoveEmptyEntries))
                     {
@@ -392,22 +395,22 @@ internal sealed class UpdateDialog : Form
         TryDelete(newPath);
     }
 
-    private async Task<bool> DownloadFileAsync(string url, string destPath)
+    private async Task<bool> DownloadFileAsync(string url, string destPath, CancellationToken ct)
     {
-        using var response = await _http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, _cts!.Token);
+        using var response = await _http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
         response.EnsureSuccessStatusCode();
 
         var totalBytes = response.Content.Headers.ContentLength ?? 0;
-        await using var contentStream = await response.Content.ReadAsStreamAsync(_cts.Token);
+        await using var contentStream = await response.Content.ReadAsStreamAsync(ct);
         await using var fileStream = new FileStream(destPath, FileMode.Create, FileAccess.Write, FileShare.None, 81920);
 
         var buffer = new byte[81920];
         long downloaded = 0;
         int read;
 
-        while ((read = await contentStream.ReadAsync(buffer, _cts.Token)) > 0)
+        while ((read = await contentStream.ReadAsync(buffer, ct)) > 0)
         {
-            await fileStream.WriteAsync(buffer.AsMemory(0, read), _cts.Token);
+            await fileStream.WriteAsync(buffer.AsMemory(0, read), ct);
             downloaded += read;
 
             if (totalBytes > 0 && !IsDisposed) BeginInvoke(() =>
