@@ -40,7 +40,7 @@ internal static class ShortcutHelper
             }
             finally { Marshal.FinalReleaseComObject(shell); }
         }
-        catch { /* Silently ignore — startup validation is best-effort */ }
+        catch (Exception ex) { Log.Warn("ValidateStartupShortcut failed: " + ex.Message); }
     }
 
     public static void CreateShortcut(string shortcutPath, string targetPath)
@@ -86,9 +86,9 @@ internal static class ShortcutHelper
                 Marshal.ReleaseComObject(shell);
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // Shortcut creation is best-effort
+            Log.Warn("CreateShortcut failed: " + ex.Message);
         }
     }
 }

@@ -137,7 +137,7 @@ internal sealed class TrayApp : Form
         if (!string.IsNullOrEmpty(customPath) && File.Exists(customPath))
         {
             try { return new Icon(customPath); }
-            catch { /* fall through */ }
+            catch (Exception ex) { Log.Warn($"LoadIcon custom '{customPath}' failed: {ex.Message}"); }
         }
 
         string dir = Path.GetDirectoryName(Environment.ProcessPath ?? "")
@@ -148,7 +148,7 @@ internal sealed class TrayApp : Form
             if (File.Exists(diskPath))
             {
                 try { return new Icon(diskPath); }
-                catch { /* fall through */ }
+                catch (Exception ex) { Log.Warn($"LoadIcon disk '{diskPath}' failed: {ex.Message}"); }
             }
         }
 
@@ -304,23 +304,32 @@ internal sealed class TrayApp : Form
 
     private void OnFlashTick(object sender, EventArgs e)
     {
-        bool showOpposite = (_flashCount % 2) == 0;
-        if (showOpposite)
+        try
         {
-            // Show opposite icon
-            _trayIcon.Icon = _muted ? _iconActive : _iconMuted;
-        }
-        else
-        {
-            SetTrayIcon();
-        }
+            bool showOpposite = (_flashCount % 2) == 0;
+            if (showOpposite)
+            {
+                // Show opposite icon
+                _trayIcon.Icon = _muted ? _iconActive : _iconMuted;
+            }
+            else
+            {
+                SetTrayIcon();
+            }
 
-        _flashCount++;
-        if (_flashCount >= 2)
+            _flashCount++;
+            if (_flashCount >= 2)
+            {
+                _flashTimer.Stop();
+                _flashing = false;
+                SetTrayIcon();
+            }
+        }
+        catch (Exception ex)
         {
+            Log.Error("OnFlashTick", ex);
             _flashTimer.Stop();
             _flashing = false;
-            SetTrayIcon();
         }
     }
 
@@ -328,55 +337,64 @@ internal sealed class TrayApp : Form
 
     private void OnSyncTick(object sender, EventArgs e)
     {
-        if (!_audio.HasEndpoint)
+        try
         {
-            // Try to find a newly plugged-in mic
-            if (_audio.Initialize(_config.DeviceId))
+            if (!_audio.HasEndpoint)
             {
-                ShowTimedTooltip("Microphone detected \u2014 auto-connected.", 3000);
-                bool? m = _audio.GetMute();
-                _muted = m ?? false;
-                SyncTrayIcon();
-            }
-            return;
-        }
-
-        // Check if device is still valid
-        bool? currentMute = _audio.GetMute();
-        if (currentMute == null)
-        {
-            // Device went away
-            _audio.Release();
-            _muted = false;
-            SyncTrayIcon();
-            ShowTimedTooltip("Microphone disconnected.\nWill auto-reconnect when available.", 5000);
-            return;
-        }
-
-        bool externalMuted = currentMute.Value;
-        if (externalMuted != _muted)
-        {
-            if (_config.MuteLock)
-            {
-                // Fight back: re-apply our state
-                if (_lockDebounce)
+                // Try to find a newly plugged-in mic
+                if (_audio.Initialize(_config.DeviceId))
                 {
-                    _lockDebounce = false;
-                    return;
+                    ShowTimedTooltip("Microphone detected \u2014 auto-connected.", 3000);
+                    bool? m = _audio.GetMute();
+                    _muted = m ?? false;
+                    SyncTrayIcon();
                 }
-                _audio.SetMute(_muted);
-                _lockDebounce = true;
+                return;
+            }
+
+            // Check if device is still valid
+            bool? currentMute = _audio.GetMute();
+            if (currentMute == null)
+            {
+                // Device went away
+                _audio.Release();
+                _muted = false;
+                SyncTrayIcon();
+                ShowTimedTooltip("Microphone disconnected.\nWill auto-reconnect when available.", 5000);
+                return;
+            }
+
+            bool externalMuted = currentMute.Value;
+            if (externalMuted != _muted)
+            {
+                if (_config.MuteLock)
+                {
+                    // Fight back: re-apply our state
+                    if (_lockDebounce)
+                    {
+                        _lockDebounce = false;
+                        return;
+                    }
+                    _audio.SetMute(_muted);
+                    _lockDebounce = true;
+                }
+                else
+                {
+                    // Accept external change
+                    _muted = externalMuted;
+                    SyncTrayIcon();
+                }
             }
             else
             {
-                // Accept external change
-                _muted = externalMuted;
-                SyncTrayIcon();
+                _lockDebounce = false;
             }
         }
-        else
+        catch (Exception ex)
         {
-            _lockDebounce = false;
+            // Swallow to keep the tray alive — the global handler is our safety net,
+            // but a transient audio-service hiccup shouldn't kill the app.
+            Log.Error("OnSyncTick", ex);
         }
     }
 
@@ -405,6 +423,11 @@ internal sealed class TrayApp : Form
             NativeMethods.UnregisterHotKey(Handle, HOTKEY_ID_MAIN);
             _mainHotkeyRegistered = false;
         }
+
+        // If PTT was holding down the old hotkey's key when we re-register, the
+        // release event for that key will never arrive at us (it's bound to a
+        // different VK now). Stop the poll so the mic doesn't stay unmuted.
+        _pttTimer?.Stop();
     }
 
     private void RegisterDeafenHotkey()
@@ -491,14 +514,22 @@ internal sealed class TrayApp : Form
 
     private void OnPttPoll(object sender, EventArgs e)
     {
-        // Check if the key is still held
-        short state = NativeMethods.GetAsyncKeyState((int)_pttVk);
-        bool held = (state & 0x8000) != 0;
-        if (!held)
+        try
         {
-            _pttTimer.Stop();
-            if (_config.Mode == "push-to-talk") // guard against mode switch while held
-                SetMuteState(true, true);
+            // Check if the key is still held
+            short state = NativeMethods.GetAsyncKeyState((int)_pttVk);
+            bool held = (state & 0x8000) != 0;
+            if (!held)
+            {
+                _pttTimer.Stop();
+                if (_config.Mode == "push-to-talk") // guard against mode switch while held
+                    SetMuteState(true, true);
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Error("OnPttPoll", ex);
+            _pttTimer?.Stop();
         }
     }
 
@@ -513,12 +544,12 @@ internal sealed class TrayApp : Form
         {
             // Enter deafen
             try { _speakerWasMuted = AudioManager.GetSpeakerMute(); }
-            catch { _speakerWasMuted = false; }
+            catch (Exception ex) { Log.Warn("GetSpeakerMute failed, assuming unmuted: " + ex.Message); _speakerWasMuted = false; }
 
             if (!_muted)
                 SetMuteState(true);
             try { AudioManager.SetSpeakerMute(true); }
-            catch { /* ignore */ }
+            catch (Exception ex) { Log.Error("SetSpeakerMute(true) failed during deafen-enter", ex); }
 
             _deafened = true;
             _tooltipDirty = true;
@@ -528,10 +559,9 @@ internal sealed class TrayApp : Form
         else
         {
             // Exit deafen
-            _lockDebounce = true;
             SetMuteState(false);
             try { AudioManager.SetSpeakerMute(_speakerWasMuted); }
-            catch { /* ignore */ }
+            catch (Exception ex) { Log.Error("SetSpeakerMute restore failed during deafen-exit", ex); }
 
             _deafened = false;
             _tooltipDirty = true;
@@ -860,7 +890,7 @@ internal sealed class TrayApp : Form
         if (_deafened)
         {
             try { AudioManager.SetSpeakerMute(_speakerWasMuted); }
-            catch { /* ignore */ }
+            catch (Exception ex) { Log.Warn("SetSpeakerMute restore on exit failed: " + ex.Message); }
         }
 
         if (_audio.HasEndpoint && _muted)

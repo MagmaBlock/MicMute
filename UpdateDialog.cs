@@ -329,11 +329,12 @@ internal sealed class UpdateDialog : Form
                     }
                 }
                 catch (OperationCanceledException) { throw; }
-                catch
+                catch (Exception ex)
                 {
                     // Fail-closed: if a SHA256SUMS URL was advertised on the release,
                     // any verify failure (network blip, parse error, hash mismatch reader error)
                     // must abort the update rather than silently installing an unverified binary.
+                    Log.Error("SHA256 verification failed during update", ex);
                     TryDelete(newPath);
                     ShowError("Update integrity check failed.",
                         "Could not verify the downloaded file. Try again, or download manually from GitHub.");
@@ -358,13 +359,8 @@ internal sealed class UpdateDialog : Form
         }
         catch (IOException ex)
         {
-            // Rollback: restore old exe if possible
-            if (File.Exists(oldPath))
-            {
-                TryDelete(exePath);
-                try { File.Move(oldPath, exePath); } catch { }
-            }
-            TryDelete(newPath);
+            Log.Error("Update apply failed (IO)", ex);
+            RollbackUpdate(exePath, oldPath, newPath);
 
             ShowError(
                 ex.Message.Contains("being used by another process", StringComparison.OrdinalIgnoreCase)
@@ -374,24 +370,26 @@ internal sealed class UpdateDialog : Form
         }
         catch (TaskCanceledException)
         {
-            if (File.Exists(oldPath))
-            {
-                TryDelete(exePath);
-                try { File.Move(oldPath, exePath); } catch { }
-            }
-            TryDelete(newPath);
+            RollbackUpdate(exePath, oldPath, newPath);
             if (!IsDisposed) ShowVersionComparison();
         }
         catch (Exception ex)
         {
-            if (File.Exists(oldPath))
-            {
-                TryDelete(exePath);
-                try { File.Move(oldPath, exePath); } catch { }
-            }
-            TryDelete(newPath);
+            Log.Error("Update apply failed", ex);
+            RollbackUpdate(exePath, oldPath, newPath);
             if (!IsDisposed) ShowError("Update failed.", ex.Message);
         }
+    }
+
+    private static void RollbackUpdate(string exePath, string oldPath, string newPath)
+    {
+        if (File.Exists(oldPath))
+        {
+            TryDelete(exePath);
+            try { File.Move(oldPath, exePath); }
+            catch (Exception ex) { Log.Error("Rollback failed to restore old exe — user may need to reinstall", ex); }
+        }
+        TryDelete(newPath);
     }
 
     private async Task<bool> DownloadFileAsync(string url, string destPath)
@@ -479,7 +477,8 @@ internal sealed class UpdateDialog : Form
             var oldPath = exePath + ".old";
             if (File.Exists(oldPath))
             {
-                try { File.Move(oldPath, exePath); } catch { }
+                try { File.Move(oldPath, exePath); }
+                catch (Exception ex) { Log.Error("Torn-state recovery failed — exe missing and .old restore failed", ex); }
             }
             return;
         }

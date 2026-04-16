@@ -20,10 +20,14 @@ internal static class Program
         catch (AbandonedMutexException)
         {
             // Previous owner died without releasing — safe to proceed, we now own it.
+            Log.Warn("Mutex was abandoned — previous instance crashed without cleanup");
             acquired = true;
         }
         if (!acquired)
             return;
+
+        InstallGlobalExceptionHandlers();
+        Log.Info($"MicMute starting (afterUpdate={isAfterUpdate})");
 
         try
         {
@@ -32,6 +36,7 @@ internal static class Program
         finally
         {
             try { mutex.ReleaseMutex(); } catch { }
+            Log.Info("MicMute exiting");
         }
     }
 
@@ -47,5 +52,27 @@ internal static class Program
             UpdateDialog.ShowUpdateToast();
 
         Application.Run(new TrayApp());
+    }
+
+    private static void InstallGlobalExceptionHandlers()
+    {
+        // UI-thread exceptions. Catch-and-continue so one bad WndProc/tick
+        // doesn't kill the tray — the log is our breadcrumb for later.
+        Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+        Application.ThreadException += (_, e) =>
+            Log.Fatal("Unhandled UI-thread exception", e.Exception);
+
+        // Non-UI-thread exceptions (background tasks, finalizers, COM callbacks).
+        // .NET terminates the process after this fires — we only get to log.
+        AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+            Log.Fatal("Unhandled domain exception (terminating=" + e.IsTerminating + ")",
+                e.ExceptionObject as Exception);
+
+        // Unobserved Task exceptions — fire-and-forget `async void` or lost Tasks.
+        TaskScheduler.UnobservedTaskException += (_, e) =>
+        {
+            Log.Error("Unobserved task exception", e.Exception);
+            e.SetObserved();
+        };
     }
 }

@@ -215,7 +215,7 @@ internal sealed class SettingsDialog : Form
         if (_chkRunAtStartup.Checked && !File.Exists(startupPath))
             ShortcutHelper.CreateShortcut(startupPath, Environment.ProcessPath ?? "");
         else if (!_chkRunAtStartup.Checked && File.Exists(startupPath))
-            try { File.Delete(startupPath); } catch { /* ignore */ }
+            try { File.Delete(startupPath); } catch (Exception ex) { Log.Warn("Delete startup shortcut failed: " + ex.Message); }
 
         // Deafen hotkey
         _config.DeafenHotkey = _capturedDeafenHK;
