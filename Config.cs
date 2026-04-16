@@ -253,6 +253,19 @@ internal sealed class Config
             "NUMPADDIV" or "NUMPAD/" => 0x6F,
             "NUMPADDOT" or "NUMPAD." => 0x6E,
             "NUMPADENTER" => 0x0D, // same VK, distinguishable by extended flag
+            // VK_OEM_* punctuation — HotkeyDialog can capture these as bare keys
+            // (US layout — other layouts map the same VK to different glyphs)
+            ";" or ":" => 0xBA,      // VK_OEM_1
+            "=" or "+" => 0xBB,      // VK_OEM_PLUS
+            "," or "<" => 0xBC,      // VK_OEM_COMMA
+            "-" or "_" => 0xBD,      // VK_OEM_MINUS
+            "." or ">" => 0xBE,      // VK_OEM_PERIOD
+            "/" or "?" => 0xBF,      // VK_OEM_2
+            "`" or "~" => 0xC0,      // VK_OEM_3
+            "[" or "{" => 0xDB,      // VK_OEM_4
+            "\\" or "|" => 0xDC,     // VK_OEM_5
+            "]" or "}" => 0xDD,      // VK_OEM_6
+            "'" or "\"" => 0xDE,     // VK_OEM_7
             _ => 0,
         };
     }

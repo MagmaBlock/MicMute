@@ -38,8 +38,16 @@ jobs:
         shell: bash
         run: cp bin/Release/net8.0-windows/win-x64/publish/MicMute.exe MicMute.exe
 
+      - name: Generate SHA256SUMS
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash MicMute.exe -Algorithm SHA256).Hash.ToLower()
+          Set-Content -Path SHA256SUMS -Value "$hash  MicMute.exe" -Encoding ASCII
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          files: MicMute.exe
+          files: |
+            MicMute.exe
+            SHA256SUMS

@@ -331,7 +331,13 @@ internal sealed class UpdateDialog : Form
                 catch (OperationCanceledException) { throw; }
                 catch
                 {
-                    // SHA256SUMS fetch failed — defense-in-depth, proceed without verification
+                    // Fail-closed: if a SHA256SUMS URL was advertised on the release,
+                    // any verify failure (network blip, parse error, hash mismatch reader error)
+                    // must abort the update rather than silently installing an unverified binary.
+                    TryDelete(newPath);
+                    ShowError("Update integrity check failed.",
+                        "Could not verify the downloaded file. Try again, or download manually from GitHub.");
+                    return;
                 }
             }
 

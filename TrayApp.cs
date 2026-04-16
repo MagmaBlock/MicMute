@@ -763,14 +763,33 @@ internal sealed class TrayApp : Form
     private void ShowHotkeyDialog()
     {
         using var dlg = new HotkeyDialog(_config.Hotkey);
-        if (dlg.ShowDialog() == DialogResult.OK && !string.IsNullOrEmpty(dlg.ResultHotkey))
+        if (dlg.ShowDialog() != DialogResult.OK || string.IsNullOrEmpty(dlg.ResultHotkey))
+            return;
+
+        // Validate before replacing so a bad pick (e.g. a key VK_OEM doesn't map)
+        // doesn't leave the user in tray-only mode with their hotkey gone.
+        if (!Config.ParseHotkey(dlg.ResultHotkey, out _, out _))
         {
-            _config.Hotkey = dlg.ResultHotkey;
-            RegisterMainHotkey();
-            BuildTrayMenu();
-            _config.Save();
-            ShowTimedTooltip("Hotkey changed to: " + Config.HotkeyToReadable(_config.Hotkey), 3000);
+            ShowTimedTooltip("That key combination can't be used as a hotkey.\nKeeping previous: " +
+                Config.HotkeyToReadable(_config.Hotkey), 5000);
+            return;
         }
+
+        string previousHotkey = _config.Hotkey;
+        _config.Hotkey = dlg.ResultHotkey;
+        RegisterMainHotkey();
+
+        // If the OS refused the bind (another app owns the combo), revert.
+        if (!_mainHotkeyRegistered)
+        {
+            _config.Hotkey = previousHotkey;
+            RegisterMainHotkey();
+            return;
+        }
+
+        BuildTrayMenu();
+        _config.Save();
+        ShowTimedTooltip("Hotkey changed to: " + Config.HotkeyToReadable(_config.Hotkey), 3000);
     }
 
     private void ShowSettingsDialog()
