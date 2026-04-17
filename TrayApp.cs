@@ -365,12 +365,24 @@ internal sealed class TrayApp : Form
                 // stuck with speakers muted and no UI affordance to recover.
                 // Restore speakers to their pre-deafen state and clear the
                 // deafen flag so the tooltip doesn't contradict itself.
+                // Only clear _deafened if the speaker restore actually
+                // succeeded — otherwise next mic-plug won't know we were
+                // deafened and the user gets stuck with muted speakers AND
+                // no "deafened" state to toggle off.
                 if (_deafened)
                 {
+                    bool restored = true;
                     try { AudioManager.SetSpeakerMute(_speakerWasMuted); }
-                    catch (Exception ex) { Log.Warn("SetSpeakerMute restore on device-loss failed: " + ex.Message); }
-                    _deafened = false;
-                    _tooltipDirty = true;
+                    catch (Exception ex)
+                    {
+                        Log.Warn("SetSpeakerMute restore on device-loss failed: " + ex.Message);
+                        restored = false;
+                    }
+                    if (restored)
+                    {
+                        _deafened = false;
+                        _tooltipDirty = true;
+                    }
                 }
 
                 SyncTrayIcon();
@@ -911,8 +923,11 @@ internal sealed class TrayApp : Form
 
     private void ShowTimedTooltip(string text, int durationMs)
     {
-        // Show notification with actual text in the OSD
-        _osdForm.ShowNotification(text, _muted, Math.Min(durationMs, 3000));
+        // Show notification with actual text in the OSD. Duration is
+        // whatever the caller asked for — important messages (hotkey
+        // conflict, mic disconnected, startup errors) need longer than
+        // the 3s cap that used to be here.
+        _osdForm.ShowNotification(text, _muted, durationMs);
     }
 
     // ── Exit & Cleanup ───────────────────────────────────────────────────

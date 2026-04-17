@@ -90,7 +90,7 @@ internal sealed class Config
 
         FixEncoding();
 
-        Hotkey = ReadIni("Hotkey", Hotkey);
+        Hotkey = MigrateLegacyHotkey("Hotkey", ReadIni("Hotkey", Hotkey));
         SoundFeedback = ReadIni("SoundFeedback", "1") == "1";
         Mode = ReadIni("Mode", Mode).Trim();
         if (Mode != "toggle" && Mode != "push-to-talk")
@@ -104,12 +104,37 @@ internal sealed class Config
         OsdEnabled = ReadIni("OSD_Enabled", "0") == "1";
         if (int.TryParse(ReadIni("OSD_Duration", "1500"), out int dur))
             OsdDuration = Math.Max(500, dur);
-        DeafenHotkey = ReadIni("DeafenHotkey", "").Trim();
+        DeafenHotkey = MigrateLegacyHotkey("DeafenHotkey", ReadIni("DeafenHotkey", "").Trim());
         MiddleClickToggle = ReadIni("MiddleClickToggle", "1") == "1";
         StartMuted = ReadIni("StartMuted", "no").Trim().ToLowerInvariant();
         if (StartMuted != "no" && StartMuted != "yes" && StartMuted != "unmuted" && StartMuted != "last")
             StartMuted = "no";
         LastMuteState = ReadIni("LastMuteState", "0") == "1";
+    }
+
+    /// <summary>
+    /// v2.1.6 tightened ParseHotkey to reject modifier-less bindings (which
+    /// would hijack that key globally). This breaks v2.1.5 users whose INI
+    /// had bare hotkeys like "Pause" or "PrintScreen". On first load of a
+    /// legacy INI, rewrite these with a safe "Ctrl+Shift+" prefix so their
+    /// hotkey keeps working instead of silently falling back to tray-only.
+    /// </summary>
+    private string MigrateLegacyHotkey(string iniKey, string value)
+    {
+        if (string.IsNullOrEmpty(value))
+            return value;
+        if (ParseHotkey(value, out _, out _))
+            return value; // already valid under v2.1.6 rules
+
+        // Try prepending Ctrl+Shift. If that parses, the original was just
+        // missing modifiers — salvageable. If it still fails, the config is
+        // genuinely unparseable and RegisterMainHotkey will surface an error.
+        string migrated = "^+" + value;
+        if (!ParseHotkey(migrated, out _, out _))
+            return value;
+
+        WriteIni(iniKey, migrated);
+        return migrated;
     }
 
     public void Save()

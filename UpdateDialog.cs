@@ -514,8 +514,14 @@ internal sealed class UpdateDialog : Form
     // ─── Static Helpers (called from Program.cs) ────────────────
 
     /// <summary>Returns true if the app is installed via winget (portable package).</summary>
+    /// <remarks>
+    /// User-scope installs:    %LOCALAPPDATA%\Microsoft\WinGet\Packages\...
+    /// Machine-scope installs: %ProgramFiles%\WinGet\Packages\...
+    /// The narrower prefix `Microsoft\WinGet\Packages` misses machine-scope.
+    /// Match just `\WinGet\Packages\` so both flavors are detected.
+    /// </remarks>
     internal static bool IsWingetManaged() =>
-        (Environment.ProcessPath ?? "").Contains(@"Microsoft\WinGet\Packages", StringComparison.OrdinalIgnoreCase);
+        (Environment.ProcessPath ?? "").Contains(@"\WinGet\Packages\", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Clean up .old/.new artifacts from a previous update.</summary>
     internal static void CleanupUpdateArtifacts()

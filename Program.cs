@@ -12,10 +12,38 @@ internal static class Program
 
         bool isAfterUpdate = args.Contains("--after-update");
 
+        // Back-compat handoff from v2.1.5 (which used Global\MicMute_SingleInstance).
+        // If a v2.1.5 instance is still winding down during upgrade, wait briefly
+        // for it to exit so we don't dual-run with two tray icons + fighting
+        // hotkey registrations. A v2.1.6+ instance never acquires Global\, so on
+        // steady-state this is either a fast miss (acquire + release) or a
+        // meaningful wait during the self-update handoff. Can be removed once
+        // all users have upgraded past 2.1.5.
+        try
+        {
+            using var legacyMutex = new Mutex(false, @"Global\MicMute_SingleInstance");
+            bool legacyHeld;
+            try
+            {
+                legacyHeld = legacyMutex.WaitOne(isAfterUpdate ? 5000 : 250, false);
+            }
+            catch (AbandonedMutexException)
+            {
+                // v2.1.5 crashed without cleanup — we now own the mutex
+                // and must release it below so v2.1.5-era shimmers don't
+                // see it as still-abandoned on a subsequent wait.
+                legacyHeld = true;
+            }
+            if (legacyHeld)
+                legacyMutex.ReleaseMutex();
+        }
+        catch (Exception ex)
+        {
+            Log.Warn("Legacy mutex check failed (non-fatal): " + ex.Message);
+        }
+
         // Single-instance: acquire ownership explicitly via WaitOne so a duplicate
         // launch exits silently instead of racing on the hotkey + INI file.
-        // Post-update: wait up to 5 s for the old exe to release the mutex during
-        // the self-replace handoff; normal launches return immediately.
         //
         // Local\ namespace = per-session. Each Windows user (fast-user-switching,
         // terminal server) gets their own tray app. Global\ would block all but
