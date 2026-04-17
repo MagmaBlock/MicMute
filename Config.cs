@@ -353,12 +353,23 @@ internal sealed class Config
     }
 
     /// <summary>
-    /// Rejects UNC paths to prevent NTLM credential leaks via SMB auth.
+    /// Reject path forms that reach network shares or devices — these can
+    /// leak NTLM credentials over SMB (`\\server\share`, `\\?\UNC\...`)
+    /// or hit NT object namespace (`\\.\pipe\...`). Also reject the
+    /// `file://` URI form since SoundPlayer/Icon happily dereferences it
+    /// back into the same UNC paths we're trying to block.
     /// </summary>
     private static string SanitizePath(string path)
     {
-        if (string.IsNullOrWhiteSpace(path)) return "";
-        if (path.StartsWith(@"\\")) return ""; // Block UNC paths (NTLM leak risk)
+        if (string.IsNullOrWhiteSpace(path))
+            return "";
+        string trimmed = path.TrimStart();
+        if (trimmed.StartsWith(@"\\", StringComparison.Ordinal))
+            return "";                                      // `\\server\share` UNC, `\\?\UNC\...`, `\\.\device`
+        if (trimmed.StartsWith("//", StringComparison.Ordinal))
+            return "";                                      // forward-slash UNC variant
+        if (trimmed.StartsWith("file:", StringComparison.OrdinalIgnoreCase))
+            return "";                                      // `file://server/share/...` → SMB auth
         return path;
     }
 

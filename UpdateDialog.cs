@@ -134,11 +134,63 @@ internal sealed class UpdateDialog : Form
 
     private static HttpClient CreateHttpClient()
     {
+        // Disable automatic redirects so every hop's Location header can be
+        // revalidated against the allowlist. Default .NET behaviour would
+        // follow up to 50 redirects silently — and IsAllowedReleaseOrigin
+        // would only have seen the initial URL, so a compromised edge/bucket
+        // could 302 to an attacker host and slip past the check.
+        var handler = new HttpClientHandler
+        {
+            AllowAutoRedirect = false,
+            AutomaticDecompression =
+                System.Net.DecompressionMethods.GZip | System.Net.DecompressionMethods.Deflate
+        };
         var version = Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.0";
-        var client = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        var client = new HttpClient(handler, disposeHandler: true) { Timeout = TimeSpan.FromSeconds(30) };
         client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue(AppName, version));
         client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
         return client;
+    }
+
+    // Max redirect hops — legitimate GitHub → objects.githubusercontent.com
+    // is 1 hop. 5 is enough slack for regional CDN or tag-to-release rewrites
+    // while keeping a compromised release from pointing at an attacker chain.
+    private const int MaxRedirectHops = 5;
+
+    /// <summary>
+    /// Wrapper around `_http.GetAsync` that manually follows 3xx redirects
+    /// and re-validates every `Location` header against the allowlist.
+    /// Throws HttpRequestException if the hop limit is exceeded or if any
+    /// intermediate URL falls outside the allowed origins.
+    /// </summary>
+    private static async Task<HttpResponseMessage> GetWithValidatedRedirectsAsync(
+        string url, HttpCompletionOption completionOption, CancellationToken ct)
+    {
+        if (!IsAllowedReleaseOrigin(url))
+            throw new HttpRequestException($"URL is not from an allowed origin: {url}");
+
+        string current = url;
+        for (int hop = 0; hop <= MaxRedirectHops; hop++)
+        {
+            var response = await _http.GetAsync(current, completionOption, ct);
+            int status = (int)response.StatusCode;
+            if (status < 300 || status >= 400)
+                return response; // non-redirect — caller owns the response
+
+            var location = response.Headers.Location;
+            response.Dispose();
+            if (location == null)
+                throw new HttpRequestException($"Redirect from {current} had no Location header");
+
+            Uri nextUri = location.IsAbsoluteUri
+                ? location
+                : new Uri(new Uri(current), location);
+            string next = nextUri.ToString();
+            if (!IsAllowedReleaseOrigin(next))
+                throw new HttpRequestException($"Redirect target is not from an allowed origin: {next}");
+            current = next;
+        }
+        throw new HttpRequestException($"Too many redirects (>{MaxRedirectHops}) for {url}");
     }
 
     // ─── Check GitHub ───────────────────────────────────────────
@@ -163,7 +215,7 @@ internal sealed class UpdateDialog : Form
 
         try
         {
-            var response = await _http.GetAsync(
+            var response = await GetWithValidatedRedirectsAsync(
                 $"https://api.github.com/repos/{GitHubRepo}/releases/latest",
                 HttpCompletionOption.ResponseHeadersRead,
                 _cts.Token);
@@ -323,7 +375,7 @@ internal sealed class UpdateDialog : Form
                 _lblStatus.Text = "Verifying integrity...";
                 try
                 {
-                    using var hashResponse = await _http.GetAsync(
+                    using var hashResponse = await GetWithValidatedRedirectsAsync(
                         _hashFileUrl, HttpCompletionOption.ResponseHeadersRead, ct);
                     hashResponse.EnsureSuccessStatusCode();
                     if (hashResponse.Content.Headers.ContentLength is long hashLen && hashLen > MaxHashFileBytes)
@@ -432,7 +484,8 @@ internal sealed class UpdateDialog : Form
 
     private async Task<bool> DownloadFileAsync(string url, string destPath, CancellationToken ct)
     {
-        using var response = await _http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
+        using var response = await GetWithValidatedRedirectsAsync(
+            url, HttpCompletionOption.ResponseHeadersRead, ct);
         response.EnsureSuccessStatusCode();
 
         var totalBytes = response.Content.Headers.ContentLength ?? 0;
@@ -606,10 +659,33 @@ internal sealed class UpdateDialog : Form
         try { if (File.Exists(path)) File.Delete(path); } catch { }
     }
 
-    private static bool IsAllowedReleaseOrigin(string url) =>
-        !string.IsNullOrEmpty(url) &&
-        (url.StartsWith("https://github.com/itsnateai/", StringComparison.OrdinalIgnoreCase) ||
-         url.StartsWith("https://objects.githubusercontent.com/", StringComparison.OrdinalIgnoreCase));
+    /// <summary>
+    /// Origin allowlist for both the exe download and the SHA256SUMS fetch.
+    /// Host-based (not prefix) so a future attacker-controlled subdomain
+    /// can't sneak past — `objects.githubusercontent.com.evil.example` no
+    /// longer matches the way a `StartsWith` prefix check would have.
+    /// HTTPS-only, explicit host set, explicit owner scope on github.com.
+    /// </summary>
+    private static bool IsAllowedReleaseOrigin(string url)
+    {
+        if (string.IsNullOrEmpty(url))
+            return false;
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+            return false;
+        if (uri.Scheme != Uri.UriSchemeHttps)
+            return false;
+
+        string host = uri.Host;
+        if (host.Equals("objects.githubusercontent.com", StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (host.Equals("api.github.com", StringComparison.OrdinalIgnoreCase) &&
+            uri.AbsolutePath.StartsWith($"/repos/{GitHubRepo}/", StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (host.Equals("github.com", StringComparison.OrdinalIgnoreCase) &&
+            uri.AbsolutePath.StartsWith($"/{GitHubRepo}/", StringComparison.OrdinalIgnoreCase))
+            return true;
+        return false;
+    }
 
     /// <summary>
     /// Reads the response body as a string but caps the total bytes read.
