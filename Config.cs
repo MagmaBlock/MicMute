@@ -36,15 +36,15 @@ internal sealed class Config
     private static readonly Regex s_modifierPrefix = new(@"^[<>#^!+~*$]+", RegexOptions.Compiled);
     private static readonly Regex s_stripModifiers = new(@"^[<>#^!+~*$]+", RegexOptions.Compiled);
 
+    // Signal from Load() → Save() that a legacy-format key was rewritten
+    // mid-load and should be persisted. One Save() handles all migrations
+    // rather than one WriteIni per key.
+    private bool _migrationPending;
+
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
     private static extern uint GetPrivateProfileString(
         string lpAppName, string lpKeyName, string lpDefault,
         StringBuilder lpReturnedString, uint nSize, string lpFileName);
-
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool WritePrivateProfileString(
-        string lpAppName, string lpKeyName, string lpString, string lpFileName);
 
     public Config()
     {
@@ -90,7 +90,7 @@ internal sealed class Config
 
         FixEncoding();
 
-        Hotkey = MigrateLegacyHotkey("Hotkey", ReadIni("Hotkey", Hotkey));
+        Hotkey = MigrateLegacyHotkey(ReadIni("Hotkey", Hotkey));
         SoundFeedback = ReadIni("SoundFeedback", "1") == "1";
         Mode = ReadIni("Mode", Mode).Trim();
         if (Mode != "toggle" && Mode != "push-to-talk")
@@ -104,12 +104,21 @@ internal sealed class Config
         OsdEnabled = ReadIni("OSD_Enabled", "0") == "1";
         if (int.TryParse(ReadIni("OSD_Duration", "1500"), out int dur))
             OsdDuration = Math.Max(500, dur);
-        DeafenHotkey = MigrateLegacyHotkey("DeafenHotkey", ReadIni("DeafenHotkey", "").Trim());
+        DeafenHotkey = MigrateLegacyHotkey(ReadIni("DeafenHotkey", "").Trim());
         MiddleClickToggle = ReadIni("MiddleClickToggle", "1") == "1";
         StartMuted = ReadIni("StartMuted", "no").Trim().ToLowerInvariant();
         if (StartMuted != "no" && StartMuted != "yes" && StartMuted != "unmuted" && StartMuted != "last")
             StartMuted = "no";
         LastMuteState = ReadIni("LastMuteState", "0") == "1";
+
+        // Persist any v2.1.5 → v2.1.6 bare-hotkey migrations so the next
+        // launch reads the already-valid value (and so the user's "change
+        // hotkey" flow doesn't revert to the original legacy string).
+        if (_migrationPending)
+        {
+            _migrationPending = false;
+            Save();
+        }
     }
 
     /// <summary>
@@ -119,7 +128,7 @@ internal sealed class Config
     /// legacy INI, rewrite these with a safe "Ctrl+Shift+" prefix so their
     /// hotkey keeps working instead of silently falling back to tray-only.
     /// </summary>
-    private string MigrateLegacyHotkey(string iniKey, string value)
+    private string MigrateLegacyHotkey(string value)
     {
         if (string.IsNullOrEmpty(value))
             return value;
@@ -133,34 +142,68 @@ internal sealed class Config
         if (!ParseHotkey(migrated, out _, out _))
             return value;
 
-        WriteIni(iniKey, migrated);
+        _migrationPending = true;
         return migrated;
     }
 
-    public void Save()
+    /// <summary>
+    /// Serialize the full config as a canonical INI and replace the file
+    /// atomically (write to .tmp, File.Move swap). Returns true on success.
+    /// v2.1.6 and earlier used 14 sequential WritePrivateProfileString
+    /// calls per Save(), which could corrupt the INI if the system crashed
+    /// mid-sequence — leaving users with truncated config on reboot.
+    /// </summary>
+    public bool Save()
     {
-        WriteIni("Hotkey", Hotkey);
-        WriteIni("SoundFeedback", SoundFeedback ? "1" : "0");
-        WriteIni("Mode", Mode);
-        WriteIni("DeviceId", DeviceId);
-        WriteIni("IconMuted", IconMuted);
-        WriteIni("IconActive", IconActive);
-        WriteIni("MuteSound", MuteSound);
-        WriteIni("UnmuteSound", UnmuteSound);
-        WriteIni("MuteLock", MuteLock ? "1" : "0");
-        WriteIni("OSD_Enabled", OsdEnabled ? "1" : "0");
-        WriteIni("OSD_Duration", OsdDuration.ToString());
-        WriteIni("DeafenHotkey", DeafenHotkey);
-        WriteIni("MiddleClickToggle", MiddleClickToggle ? "1" : "0");
-        WriteIni("StartMuted", StartMuted);
+        var sb = new StringBuilder();
+        sb.AppendLine("[General]");
+        sb.AppendLine("Hotkey=" + Hotkey);
+        sb.AppendLine("SoundFeedback=" + (SoundFeedback ? "1" : "0"));
+        sb.AppendLine("Mode=" + Mode);
+        sb.AppendLine("DeviceId=" + DeviceId);
+        sb.AppendLine("IconMuted=" + IconMuted);
+        sb.AppendLine("IconActive=" + IconActive);
+        sb.AppendLine("MuteSound=" + MuteSound);
+        sb.AppendLine("UnmuteSound=" + UnmuteSound);
+        sb.AppendLine("MuteLock=" + (MuteLock ? "1" : "0"));
+        sb.AppendLine("OSD_Enabled=" + (OsdEnabled ? "1" : "0"));
+        sb.AppendLine("OSD_Duration=" + OsdDuration.ToString());
+        sb.AppendLine("DeafenHotkey=" + DeafenHotkey);
+        sb.AppendLine("MiddleClickToggle=" + (MiddleClickToggle ? "1" : "0"));
+        sb.AppendLine("StartMuted=" + StartMuted);
+        sb.AppendLine("LastMuteState=" + (LastMuteState ? "1" : "0"));
+
+        return WriteAtomic(sb.ToString());
     }
 
-    public void SaveLastMuteState(bool muted)
+    public bool SaveLastMuteState(bool muted)
     {
         if (StartMuted != "last")
-            return;
+            return true;
         LastMuteState = muted;
-        WriteIni("LastMuteState", muted ? "1" : "0");
+        return Save();
+    }
+
+    private bool WriteAtomic(string content)
+    {
+        string tmp = _iniPath + ".tmp";
+        try
+        {
+            string dir = Path.GetDirectoryName(_iniPath);
+            if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+                Directory.CreateDirectory(dir);
+
+            File.WriteAllText(tmp, content, new UTF8Encoding(false));
+            File.Move(tmp, _iniPath, overwrite: true);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"Config save failed ({_iniPath}): {ex.GetType().Name}: {ex.Message}");
+            try { if (File.Exists(tmp)) File.Delete(tmp); }
+            catch { /* cleanup best-effort */ }
+            return false;
+        }
     }
 
     /// <summary>
@@ -326,13 +369,10 @@ internal sealed class Config
         return sb.ToString().Trim();
     }
 
-    private void WriteIni(string key, string value)
-    {
-        WritePrivateProfileString("General", key, value, _iniPath);
-    }
-
     /// <summary>
     /// Fix UTF-16 LE without BOM encoding issue (mirrors AHK FixIniEncoding).
+    /// Rewrites atomically via .tmp swap so a crash mid-rewrite can't corrupt
+    /// the INI beyond recovery.
     /// </summary>
     private void FixEncoding()
     {
@@ -346,7 +386,7 @@ internal sealed class Config
                 return;
             // UTF-16 LE without BOM — re-encode to UTF-8
             string content = Encoding.Unicode.GetString(bytes);
-            File.WriteAllText(_iniPath, content, new UTF8Encoding(false));
+            WriteAtomic(content);
         }
         catch
         {

@@ -226,8 +226,18 @@ internal sealed class SettingsDialog : Form
         _config.MuteSound = _edtMuteSound.Text.Trim();
         _config.UnmuteSound = _edtUnmuteSound.Text.Trim();
 
-        _config.Save();
+        bool saved = _config.Save();
         _onApply();
+        if (!saved)
+        {
+            MessageBox.Show(this,
+                "Settings were applied to the current session, but couldn't be written to MicMute.ini. " +
+                "Your changes will be lost on next launch.\n\n" +
+                "Check that MicMute has permission to write to its config folder.",
+                "MicMute \u2014 Settings not saved",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+        }
     }
 
     private void AddSectionHeader(string text, int x, ref int y)

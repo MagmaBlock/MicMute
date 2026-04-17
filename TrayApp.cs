@@ -689,7 +689,8 @@ internal sealed class TrayApp : Form
         BuildTrayMenu();
         _tooltipDirty = true;
         SetTrayIcon();
-        _config.Save();
+        if (!_config.Save())
+            ShowTimedTooltip("Mode changed, but settings couldn't be saved.\nCheck permissions on MicMute.ini.", 4000);
 
         if (_config.SoundFeedback)
             PlayModeChirp(newMode);
@@ -847,7 +848,8 @@ internal sealed class TrayApp : Form
         }
         SyncTrayIcon();
         BuildTrayMenu();
-        _config.Save();
+        if (!_config.Save())
+            ShowTimedTooltip("Mic source changed, but settings couldn't be saved.\nCheck permissions on MicMute.ini.", 4000);
 
         ShowTimedTooltip(string.IsNullOrEmpty(deviceId)
             ? "Using system default microphone."
@@ -939,8 +941,10 @@ internal sealed class TrayApp : Form
         }
 
         BuildTrayMenu();
-        _config.Save();
-        ShowTimedTooltip("Hotkey changed to: " + Config.HotkeyToReadable(_config.Hotkey), 3000);
+        if (_config.Save())
+            ShowTimedTooltip("Hotkey changed to: " + Config.HotkeyToReadable(_config.Hotkey), 3000);
+        else
+            ShowTimedTooltip("Hotkey changed, but settings couldn't be saved.\nIt will revert to the old hotkey on next launch.", 5000);
     }
 
     private void ShowSettingsDialog()
