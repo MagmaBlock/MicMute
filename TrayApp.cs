@@ -424,10 +424,14 @@ internal sealed class TrayApp : Form
             _mainHotkeyRegistered = false;
         }
 
-        // If PTT was holding down the old hotkey's key when we re-register, the
-        // release event for that key will never arrive at us (it's bound to a
-        // different VK now). Stop the poll so the mic doesn't stay unmuted.
+        // If PTT was actively polling (user holding the old hotkey), the key's
+        // release event will never arrive — it's bound to a different VK now,
+        // or no VK at all. Stop the poll AND re-mute so the mic doesn't stay
+        // open. Covers both hotkey rebind and mode-switch while held.
+        bool wasPolling = _pttTimer?.Enabled == true;
         _pttTimer?.Stop();
+        if (wasPolling && _audio.HasEndpoint && !_muted)
+            SetMuteState(true, true);
     }
 
     private void RegisterDeafenHotkey()

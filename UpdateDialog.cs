@@ -44,6 +44,7 @@ internal sealed class UpdateDialog : Form
         MinimizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
         TopMost = true;
+        AutoScaleMode = AutoScaleMode.Dpi;
         ClientSize = new Size(420, 180);
 
         _boldFont = new Font("Segoe UI", 9.5f, FontStyle.Bold);
@@ -282,8 +283,7 @@ internal sealed class UpdateDialog : Form
         try
         {
             // Validate download URL origin before fetching
-            if (!_downloadUrl.StartsWith("https://github.com/itsnateai/", StringComparison.OrdinalIgnoreCase) &&
-                !_downloadUrl.StartsWith("https://objects.githubusercontent.com/", StringComparison.OrdinalIgnoreCase))
+            if (!IsAllowedReleaseOrigin(_downloadUrl))
             {
                 ShowError("Update failed: download URL is not from the expected source.", _downloadUrl ?? "(null)");
                 return;
@@ -295,6 +295,17 @@ internal sealed class UpdateDialog : Form
             // Verify SHA256 hash if the release includes a SHA256SUMS file
             if (!string.IsNullOrEmpty(_hashFileUrl))
             {
+                // Apply the same origin allowlist to the checksum file. Both
+                // URLs come from the GitHub releases API today, but verifying
+                // both halves keeps the self-update pipeline belt-and-suspenders.
+                if (!IsAllowedReleaseOrigin(_hashFileUrl))
+                {
+                    TryDelete(newPath);
+                    ShowError("Update integrity check failed.",
+                        "Checksum file URL is not from the expected source.");
+                    return;
+                }
+
                 _lblStatus.Text = "Verifying integrity...";
                 try
                 {
@@ -549,6 +560,11 @@ internal sealed class UpdateDialog : Form
     {
         try { if (File.Exists(path)) File.Delete(path); } catch { }
     }
+
+    private static bool IsAllowedReleaseOrigin(string url) =>
+        !string.IsNullOrEmpty(url) &&
+        (url.StartsWith("https://github.com/itsnateai/", StringComparison.OrdinalIgnoreCase) ||
+         url.StartsWith("https://objects.githubusercontent.com/", StringComparison.OrdinalIgnoreCase));
 
     private static string ComputeFileHash(string filePath)
     {
