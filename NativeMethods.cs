@@ -36,6 +36,10 @@ internal static class NativeMethods
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool PlaySound(string pszSound, nint hmod, uint fdwSound);
 
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool DestroyIcon(nint hIcon);
+
     // PlaySound flags
     public const uint SND_FILENAME = 0x00020000;
     public const uint SND_SYNC = 0x0000;

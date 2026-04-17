@@ -1,26 +1,32 @@
 namespace MicMute;
 
 /// <summary>
-/// Borderless, always-on-top, click-through OSD overlay that shows mute state
-/// or arbitrary notification text. Positioned above the taskbar, auto-dismisses.
+/// Discreet borderless OSD pinned above the system tray. Click-through,
+/// no-activate, auto-dismiss, cached GDI resources.
+///
+/// v2 palette ported from MWBToggle — softened greys, regular (not semibold)
+/// weight, muted accent dots, tighter padding, lower opacity. Same positioning
+/// logic as before: Shell_TrayWnd anchoring when it lands inside the working
+/// area, working-area corner fallback for top/left/right taskbars.
 /// </summary>
 internal sealed class OsdForm : Form
 {
     private readonly System.Windows.Forms.Timer _dismissTimer;
     private bool _disposed;
 
-    // Cached brushes and font — created once, reused across the app lifetime
-    private static readonly Font s_dotFont = new("Segoe UI", 10f);
-    private static readonly Font s_labelFont = new("Segoe UI Semibold", 9f);
-    private static readonly SolidBrush s_bgBrush = new(Color.FromArgb(0x1E, 0x1E, 0x1E));
-    private static readonly SolidBrush s_textBrush = new(Color.FromArgb(0xE0, 0xE0, 0xE0));
-    private static readonly SolidBrush s_mutedDotBrush = new(Color.FromArgb(0xE0, 0x40, 0x40));
-    private static readonly SolidBrush s_activeDotBrush = new(Color.FromArgb(0x2E, 0xCC, 0x71));
+    // Cached GDI resources — created once, reused across the app lifetime.
+    private static readonly Font s_labelFont = new("Segoe UI", 9f);
+    private static readonly SolidBrush s_bgBrush = new(Color.FromArgb(0x24, 0x24, 0x26));
+    private static readonly SolidBrush s_textBrush = new(Color.FromArgb(0xC8, 0xC8, 0xCC));
+    private static readonly SolidBrush s_mutedDotBrush = new(Color.FromArgb(0xCC, 0x5A, 0x5A));  // muted red
+    private static readonly SolidBrush s_activeDotBrush = new(Color.FromArgb(0x4C, 0xB8, 0x74)); // muted green
 
-    // Cached display strings for mute state
     private static readonly string s_mutedLabel = "Mic Muted";
     private static readonly string s_activeLabel = "Mic Active";
-    private const string DotChar = "\u25CF"; // ●
+    // Dot is drawn via FillEllipse for deterministic pixel placement —
+    // DrawString(U+25CF) shifts vertically with font metrics and ends up
+    // 1-2px below the letter baseline.
+    private const int DotSize = 8;
 
     private bool _showMuted;
     private string _customText;
@@ -31,14 +37,14 @@ internal sealed class OsdForm : Form
         ShowInTaskbar = false;
         TopMost = true;
         StartPosition = FormStartPosition.Manual;
-        BackColor = Color.FromArgb(0x1E, 0x1E, 0x1E);
+        BackColor = Color.FromArgb(0x24, 0x24, 0x26);
         SetStyle(ControlStyles.SupportsTransparentBackColor, true);
 
         _dismissTimer = new System.Windows.Forms.Timer();
         _dismissTimer.Tick += (_, _) =>
         {
             _dismissTimer.Stop();
-            Hide();
+            if (!_disposed) Hide();
         };
     }
 
@@ -56,9 +62,7 @@ internal sealed class OsdForm : Form
 
     protected override bool ShowWithoutActivation => true;
 
-    /// <summary>
-    /// Show the OSD with standard mute/active state display.
-    /// </summary>
+    /// <summary>Show the OSD with standard mute/active state display.</summary>
     public void ShowOsd(bool muted, int durationMs)
     {
         _showMuted = muted;
@@ -66,9 +70,7 @@ internal sealed class OsdForm : Form
         ShowInternal(muted ? s_mutedLabel : s_activeLabel, durationMs);
     }
 
-    /// <summary>
-    /// Show the OSD with custom notification text.
-    /// </summary>
+    /// <summary>Show the OSD with custom notification text.</summary>
     public void ShowNotification(string text, bool isMuted, int durationMs)
     {
         _showMuted = isMuted;
@@ -80,67 +82,64 @@ internal sealed class OsdForm : Form
     {
         // Defensive: any failure in measurement/positioning should not kill
         // the OSD pipeline or propagate to the caller (a hotkey handler).
-        // Log and silently skip the notification — next toggle will try again.
         try
         {
-            if (_disposed || IsDisposed)
-                return;
+            if (_disposed || IsDisposed) return;
+            if (string.IsNullOrWhiteSpace(displayText)) return;
 
-            // Measure text
-            using var g = CreateGraphics();
-            var labelSize = g.MeasureString(displayText, s_labelFont);
-            int w = 12 + 14 + (int)labelSize.Width + 16;
-            int h = 32;
-
-            // Position above taskbar — working-area corner is the safe
-            // default for any taskbar orientation.
-            var screen = Screen.PrimaryScreen ?? Screen.AllScreens[0];
-            var workArea = screen.WorkingArea;
-            int xPos = workArea.Right - w - 12;
-            int yPos = workArea.Bottom - h - 8;
-
-            // Try to find the taskbar for pixel-perfect anchoring (bottom
-            // taskbar only — the default Windows layout). Top / left / right
-            // taskbars land the OSD off-screen with a naive rect.Top anchor,
-            // so we only honour the precise placement when it stays within
-            // the working area; otherwise the working-area fallback wins.
-            nint trayHwnd = NativeMethods.FindWindow("Shell_TrayWnd", "");
-            if (trayHwnd != 0 &&
-                NativeMethods.GetWindowRect(trayHwnd, out var rect))
+            // Measure text — tighter padding (10 + 12 + text + 12) and a
+            // shorter pill height than the original high-contrast variant.
+            using (var g = CreateGraphics())
             {
-                int anchoredX = rect.Right - w - 12;
-                int anchoredY = rect.Top - h - 8;
-                if (anchoredY >= workArea.Top &&
-                    anchoredX >= workArea.Left &&
-                    anchoredX + w <= workArea.Right)
+                var labelSize = g.MeasureString(displayText, s_labelFont);
+                int w = 10 + 12 + (int)Math.Ceiling(labelSize.Width) + 12;
+                int h = 28;
+
+                // Default anchor: bottom-right corner of the working area.
+                // WorkingArea already excludes the taskbar regardless of its
+                // edge (top/left/right/bottom), so this is safe for every
+                // taskbar orientation.
+                var screen = Screen.PrimaryScreen ?? Screen.AllScreens[0];
+                var workArea = screen.WorkingArea;
+                int xPos = workArea.Right - w - 12;
+                int yPos = workArea.Bottom - h - 8;
+
+                // Try precise Shell_TrayWnd anchoring; accept only if it
+                // stays inside the working area. Top/left/right taskbars
+                // place the naive anchor off-screen — the bounds check
+                // rejects those and the working-area fallback wins.
+                nint trayHwnd = NativeMethods.FindWindow("Shell_TrayWnd", "");
+                if (trayHwnd != 0 &&
+                    NativeMethods.GetWindowRect(trayHwnd, out var rect))
                 {
-                    xPos = anchoredX;
-                    yPos = anchoredY;
+                    int anchoredX = rect.Right - w - 12;
+                    int anchoredY = rect.Top - h - 8;
+                    if (anchoredY >= workArea.Top &&
+                        anchoredX >= workArea.Left &&
+                        anchoredX + w <= workArea.Right)
+                    {
+                        xPos = anchoredX;
+                        yPos = anchoredY;
+                    }
                 }
+
+                SetBounds(xPos, yPos, w, h);
             }
 
-            SetBounds(xPos, yPos, w, h);
+            // Win11 rounded corners — returns HRESULT on older Windows
+            // without throwing. Enhancement, not a requirement.
+            int preference = NativeMethods.DWMWCP_ROUND;
+            _ = NativeMethods.DwmSetWindowAttribute(Handle,
+                NativeMethods.DWMWA_WINDOW_CORNER_PREFERENCE,
+                ref preference, sizeof(int));
 
-            // Try Win11 rounded corners
-            try
-            {
-                int preference = NativeMethods.DWMWCP_ROUND;
-                NativeMethods.DwmSetWindowAttribute(Handle,
-                    NativeMethods.DWMWA_WINDOW_CORNER_PREFERENCE, ref preference, sizeof(int));
-            }
-            catch
-            {
-                // Older Windows — ignore
-            }
-
-            Opacity = 235.0 / 255.0;
+            Opacity = 215.0 / 255.0;
             Invalidate();
 
-            if (!Visible)
-                Show();
+            if (!Visible) Show();
 
             _dismissTimer.Stop();
-            _dismissTimer.Interval = durationMs;
+            _dismissTimer.Interval = Math.Max(500, durationMs);
             _dismissTimer.Start();
         }
         catch (Exception ex)
@@ -154,11 +153,17 @@ internal sealed class OsdForm : Form
         var g = e.Graphics;
         g.FillRectangle(s_bgBrush, ClientRectangle);
 
+        // Centre the dot vertically against the 28px pill. SmoothingMode
+        // antialiases the ellipse so it doesn't look like a chunky square.
+        var prev = g.SmoothingMode;
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
         var dotBrush = _showMuted ? s_mutedDotBrush : s_activeDotBrush;
-        g.DrawString(DotChar, s_dotFont, dotBrush, 12, 6);
+        int dotY = (ClientSize.Height - DotSize) / 2;
+        g.FillEllipse(dotBrush, 11, dotY, DotSize, DotSize);
+        g.SmoothingMode = prev;
 
         string label = _customText ?? (_showMuted ? s_mutedLabel : s_activeLabel);
-        g.DrawString(label, s_labelFont, s_textBrush, 28, 6);
+        g.DrawString(label, s_labelFont, s_textBrush, 24, 5);
     }
 
     protected override void Dispose(bool disposing)

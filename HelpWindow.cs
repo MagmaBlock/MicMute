@@ -1,13 +1,16 @@
 namespace MicMute;
 
+using System.Text;
+
 /// <summary>
-/// Singleton resizable help window displaying usage instructions.
+/// Singleton resizable help window. Renders a structured, typographically
+/// styled view of <see cref="s_helpText"/> via a <see cref="RichTextBox"/>.
 /// </summary>
 internal sealed class HelpWindow : Form
 {
     private static HelpWindow s_instance = null!;
-    private readonly TextBox _textBox;
-    private readonly Font _windowFont;
+    private readonly RichTextBox _textBox;
+    private readonly List<Font> _fonts = new();
 
     private static readonly string s_helpText = @"MICMUTE — Global Microphone Mute Toggle
 
@@ -21,7 +24,7 @@ Red tray icon = mic is muted
 • Left-click the tray icon to toggle mute.
 • Press your hotkey (default: Win+Shift+Ctrl+A) to toggle from anywhere.
 • Right-click the tray icon for the full menu (change mode, pick a mic, open settings, etc.).
-• Change your hotkey anytime via Tray → ""Hotkey: ..."" in the menu.
+• Change your hotkey anytime via Tray → ""Change Hotkey…"" in the menu.
 
 ——— MODES ————————————————————————
 
@@ -55,7 +58,7 @@ On startup: Controls what happens to your mic when MicMute starts:
 
 ——— HOTKEYS —————————————————————
 
-Your main mute/unmute hotkey is set via the tray menu (right-click → ""Hotkey: ...""). The Settings window has a separate field for the Deafen hotkey.
+Your main mute/unmute hotkey is set via the tray menu (right-click → ""Change Hotkey…""). The Settings window has a separate field for the Deafen hotkey.
 
 Both support Windows key combinations (like Win+Shift+D). Use AHK syntax:
   # = Win,  ^ = Ctrl,  ! = Alt,  + = Shift
@@ -78,35 +81,113 @@ Right-click the tray icon → ""Mic Source"" to choose which microphone MicMute 
         Text = "MicMute v" + Config.Version + " \u2014 Help";
         TopMost = true;
         BackColor = Color.White;
-        _windowFont = new Font("Segoe UI", 9f);
-        Font = _windowFont;
-        ClientSize = new Size(460, 420);
-        MinimumSize = new Size(400, 300);
+        ClientSize = new Size(540, 560);
+        MinimumSize = new Size(440, 360);
+        StartPosition = FormStartPosition.CenterScreen;
 
-        _textBox = new TextBox
+        _textBox = new RichTextBox
         {
-            Multiline = true,
             ReadOnly = true,
-            ScrollBars = ScrollBars.Vertical,
             BorderStyle = BorderStyle.None,
-            Text = s_helpText,
-            Location = new Point(10, 10),
-            Size = new Size(440, 400),
+            BackColor = Color.White,
+            ScrollBars = RichTextBoxScrollBars.Vertical,
+            DetectUrls = false,
+            WordWrap = true,
+            TabStop = false,
+            Location = new Point(18, 14),
+            Size = new Size(ClientSize.Width - 36, ClientSize.Height - 28),
+            Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right,
         };
         Controls.Add(_textBox);
 
-        Resize += (_, _) =>
+        RenderHelp();
+
+        // Kill the default "all text selected on show" behaviour.
+        Shown += (_, _) =>
         {
-            _textBox.Size = new Size(ClientSize.Width - 20, ClientSize.Height - 20);
+            _textBox.SelectionStart = 0;
+            _textBox.SelectionLength = 0;
+            _textBox.DeselectAll();
+            ActiveControl = null;
         };
 
         FormClosed += (_, _) => s_instance = null!;
     }
 
+    private void RenderHelp()
+    {
+        // Track each font immediately — if any ctor throws (OOM / GDI
+        // exhaustion), the already-constructed ones would otherwise leak
+        // their native handles until the GC finalizer eventually runs.
+        var titleFont = new Font("Segoe UI", 13.5f, FontStyle.Bold);
+        _fonts.Add(titleFont);
+        var headerFont = new Font("Segoe UI Semibold", 10.75f, FontStyle.Bold);
+        _fonts.Add(headerFont);
+        var bodyFont = new Font("Segoe UI", 9.75f);
+        _fonts.Add(bodyFont);
+
+        var titleColor = Color.FromArgb(0x11, 0x11, 0x11);
+        var headerColor = Color.FromArgb(0x22, 0x55, 0xAA);
+        var bodyColor = Color.FromArgb(0x1E, 0x1E, 0x1E);
+
+        _textBox.Clear();
+
+        var body = new StringBuilder();
+
+        void FlushBody()
+        {
+            if (body.Length == 0) return;
+            // Collapse leading blank lines so sections don't have stacked gaps.
+            var text = body.ToString().TrimStart('\r', '\n');
+            body.Clear();
+            if (text.Length == 0) return;
+            _textBox.SelectionFont = bodyFont;
+            _textBox.SelectionColor = bodyColor;
+            _textBox.AppendText(text);
+        }
+
+        var lines = s_helpText.Replace("\r\n", "\n").Split('\n');
+        bool titleWritten = false;
+
+        foreach (var raw in lines)
+        {
+            if (!titleWritten)
+            {
+                if (string.IsNullOrWhiteSpace(raw)) continue;
+                _textBox.SelectionFont = titleFont;
+                _textBox.SelectionColor = titleColor;
+                _textBox.AppendText(raw.Trim() + "\n\n");
+                titleWritten = true;
+                continue;
+            }
+
+            if (raw.StartsWith("\u2014\u2014\u2014") || raw.StartsWith("---"))
+            {
+                FlushBody();
+                var title = raw.Trim().Trim('\u2014', '-', ' ');
+                if (title.Length == 0) continue;
+                _textBox.AppendText("\n");
+                _textBox.SelectionFont = headerFont;
+                _textBox.SelectionColor = headerColor;
+                _textBox.AppendText(title + "\n\n");
+                continue;
+            }
+
+            body.AppendLine(raw);
+        }
+        FlushBody();
+
+        _textBox.SelectionStart = 0;
+        _textBox.SelectionLength = 0;
+    }
+
     protected override void Dispose(bool disposing)
     {
         if (disposing)
-            _windowFont?.Dispose();
+        {
+            foreach (var f in _fonts) f.Dispose();
+            _fonts.Clear();
+        }
         base.Dispose(disposing);
     }
 
