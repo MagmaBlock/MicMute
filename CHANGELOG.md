@@ -4,6 +4,31 @@
 
 All notable changes to MicMute are documented here.
 
+## [2.1.8] - 2026-04-17
+
+### Added
+- **Low-latency push-to-talk (opt-in)** — new "Low-latency PTT" setting lets push-to-talk work over fullscreen games and accepts bare keys like Right-Ctrl alone (the way Discord's PTT handles it). Enable in Settings → Behavior, switch Mode to Push-to-Talk, then pick your key. Uses passive key-state reading, no keyboard hook — nothing for game anti-cheat to flag.
+- **PTT risk warning** — if you bind a key you'd press during ordinary typing (bare letter, Space, Enter, Ctrl+A/C/V/X/Z/S/F, Shift+letter, Ctrl+Shift+letter) as your low-latency PTT key, MicMute now warns you first so the mic doesn't open unexpectedly while you're working.
+
+### Changed
+- **Settings window redesign** — Custom Files rows line up cleanly with the hotkey row above. Bottom toolbar: GitHub / Help / Check-for-updates are subtle left-aligned links, OK / Apply / Cancel are right-aligned action buttons. Enter commits, Esc cancels.
+- **Help window rewrite** — actually readable now. Section headers stand out, body text no longer opens as one solid blue selection block, and the window is sized so you can read the first screen without scrolling.
+- **OSD bubble palette softened** — the mute/unmute toast uses calmer greys and a softer accent dot. Less jarring when it appears.
+- **Tray menu hotkey line tightened** — the old "Hotkey: Win + Ctrl + Shift + A" line is now "Change Hotkey…" with the current binding right-aligned, matching standard Windows menu style. No more menu stretching wide for long hotkeys.
+- **Deafen hotkey field shows its state** — empty binding now reads "(not set)" in grey instead of an instruction that looks like an error; the field highlights yellow while you're capturing a new key.
+
+### Fixed
+- **Custom tray icons no longer feel laggy** — left-click toggling with a user-chosen icon file used to feel slightly slower than the default icons. All icons are pre-sized to the actual taskbar size at load time, so every mute/unmute swap is the same speed regardless of where the icon came from.
+- **Double-blink on mode change removed** — the tray icon no longer flashes twice when you toggle mute. The error-case flash (PTT re-mute failure) is preserved — that's a real warning signal.
+- **Mute state no longer lies** — when `SetMute` silently failed (rare device race), the tray and OSD used to update as if it had worked. The actual audio state is now verified and any failure surfaces a tooltip so you can reinit the mic.
+- **Settings saves are now atomic** — if Windows crashes or the app is force-killed during a settings save, your config can no longer end up half-written and blanked on next launch. Writes go through a temp file and rename into place.
+- **Self-update checksum file is origin-verified** — the accompanying `SHA256SUMS` file now gets the same github.com / objects.githubusercontent.com origin check that the binary download has always had.
+- **Held-key safety during Settings → Apply** — if you pressed Apply while holding your PTT key, the mic could briefly stay hot while the hotkey re-registered. It's defensively re-muted first now.
+
+### Notes
+- Low-latency PTT defaults OFF — existing users see no behaviour change unless they opt in.
+- Your existing hotkey bindings and config are preserved on upgrade.
+
 ## [2.1.6] - 2026-04-16
 
 ### Fixed

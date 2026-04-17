@@ -27,6 +27,12 @@ internal sealed class Config
     public bool MiddleClickToggle = true;
     public string StartMuted = "no"; // "no", "yes", "unmuted", "last"
     public bool LastMuteState;
+    // Opt-in: poll-based PTT via GetAsyncKeyState instead of RegisterHotKey.
+    // Works over fullscreen-exclusive games and supports bare-modifier keys
+    // (LCtrl / RCtrl / RShift / etc.). No keyboard hook is installed — the
+    // key state is read passively the same way games themselves read it,
+    // so there's no anti-cheat signature.
+    public bool LowLatencyPtt;
 
     private readonly string _iniPath;
 
@@ -110,6 +116,7 @@ internal sealed class Config
         if (StartMuted != "no" && StartMuted != "yes" && StartMuted != "unmuted" && StartMuted != "last")
             StartMuted = "no";
         LastMuteState = ReadIni("LastMuteState", "0") == "1";
+        LowLatencyPtt = ReadIni("LowLatencyPtt", "0") == "1";
 
         // Persist any v2.1.5 → v2.1.6 bare-hotkey migrations so the next
         // launch reads the already-valid value (and so the user's "change
@@ -172,6 +179,7 @@ internal sealed class Config
         sb.AppendLine("MiddleClickToggle=" + (MiddleClickToggle ? "1" : "0"));
         sb.AppendLine("StartMuted=" + StartMuted);
         sb.AppendLine("LastMuteState=" + (LastMuteState ? "1" : "0"));
+        sb.AppendLine("LowLatencyPtt=" + (LowLatencyPtt ? "1" : "0"));
 
         return WriteAtomic(sb.ToString());
     }
@@ -221,13 +229,26 @@ internal sealed class Config
 
         string side = prefix.Contains('<') ? "L" : prefix.Contains('>') ? "R" : "";
         var sb = new StringBuilder();
-        if (prefix.Contains('#')) sb.Append(side).Append("Win + ");
-        if (prefix.Contains('^')) sb.Append(side).Append("Ctrl + ");
-        if (prefix.Contains('!')) sb.Append(side).Append("Alt + ");
-        if (prefix.Contains('+')) sb.Append(side).Append("Shift + ");
-        sb.Append(key.ToUpperInvariant());
+        if (prefix.Contains('#')) sb.Append(side).Append("Win+");
+        if (prefix.Contains('^')) sb.Append(side).Append("Ctrl+");
+        if (prefix.Contains('!')) sb.Append(side).Append("Alt+");
+        if (prefix.Contains('+')) sb.Append(side).Append("Shift+");
+        sb.Append(PrettifyKeyName(key));
         return sb.ToString();
     }
+
+    private static string PrettifyKeyName(string key) => key.ToUpperInvariant() switch
+    {
+        "LCTRL" or "LCONTROL" => "LCtrl",
+        "RCTRL" or "RCONTROL" => "RCtrl",
+        "LSHIFT" => "LShift",
+        "RSHIFT" => "RShift",
+        "LALT" or "LMENU" => "LAlt",
+        "RALT" or "RMENU" => "RAlt",
+        "LWIN" => "LWin",
+        "RWIN" => "RWin",
+        _ => key.ToUpperInvariant(),
+    };
 
     /// <summary>
     /// Extracts the key name from an AHK hotkey string (strips modifier symbols).
@@ -239,9 +260,12 @@ internal sealed class Config
 
     /// <summary>
     /// Parses AHK modifier symbols into Win32 modifier flags + virtual key code.
-    /// Returns false if the key cannot be mapped.
+    /// Returns false if the key cannot be mapped. Bare keys (no modifier) are
+    /// rejected by default because they would hijack every press globally; set
+    /// <paramref name="allowBare"/> to true only on paths that use polling
+    /// (Low-latency PTT) instead of <c>RegisterHotKey</c>.
     /// </summary>
-    public static bool ParseHotkey(string hk, out uint modifiers, out uint vk)
+    public static bool ParseHotkey(string hk, out uint modifiers, out uint vk, bool allowBare = false)
     {
         modifiers = 0;
         vk = 0;
@@ -258,11 +282,6 @@ internal sealed class Config
         if (prefix.Contains('!')) modifiers |= NativeMethods.MOD_ALT;
         if (prefix.Contains('+')) modifiers |= NativeMethods.MOD_SHIFT;
 
-        // Reject modifier-less hotkeys (e.g. bare "a") — they would bind
-        // globally and hijack every keypress of that key in every app.
-        // Function keys (F1-F24) are allowed bare since they're rarely
-        // typed in normal use. Everything else needs at least Ctrl/Alt/
-        // Shift/Win.
         uint realMods = modifiers; // before MOD_NOREPEAT is added
         modifiers |= NativeMethods.MOD_NOREPEAT;
 
@@ -270,12 +289,66 @@ internal sealed class Config
         if (vk == 0)
             return false;
 
+        // Bare keys are only acceptable on the polling path (allowBare).
+        // RegisterHotKey either rejects bare modifiers outright or — worse —
+        // would hijack a generic key globally. Function keys are an exception:
+        // they're rarely typed during normal use and RegisterHotKey handles
+        // them. Everything else requires a modifier unless allowBare is set.
         bool isFunctionKey = vk >= 0x70 && vk <= 0x87; // VK_F1..VK_F24
-        if (realMods == 0 && !isFunctionKey)
+        if (realMods == 0 && !isFunctionKey && !allowBare)
             return false;
 
         return true;
     }
+
+    /// <summary>
+    /// True when a hotkey would reasonably fire during ordinary app use
+    /// (bare letter/digit/Space/Enter/Tab/Esc/Backspace, Shift+letter such
+    /// as every capital letter typed, or ANY Ctrl-containing combo with a
+    /// plain letter — Ctrl+A/C/V/X/Z/S/F are every-app shortcuts and so are
+    /// Ctrl+Shift+letter and Ctrl+Alt+letter). L/R modifiers, function keys,
+    /// and Win-combos are NOT risky (they're the happy path).
+    /// </summary>
+    public static bool IsRiskyHotkey(uint modifiers, uint vk)
+    {
+        uint realMods = modifiers & ~NativeMethods.MOD_NOREPEAT;
+        bool isLetter = vk >= 'A' && vk <= 'Z';
+        bool isDigit = vk >= '0' && vk <= '9';
+
+        // Bare keys — no modifier held.
+        if (realMods == 0)
+        {
+            if (IsBareModifierVk(vk)) return false;
+            if (vk >= 0x70 && vk <= 0x87) return false; // F1-F24
+            if (isLetter || isDigit) return true;
+            if (vk is 0x20 or 0x0D or 0x09 or 0x1B or 0x08) return true; // Space/Enter/Tab/Esc/Backspace
+            return false;
+        }
+
+        // Shift+letter — every capital letter you type.
+        if (realMods == NativeMethods.MOD_SHIFT && isLetter)
+            return true;
+
+        // Any Ctrl-containing combo on a plain letter. Covers Ctrl+A, Ctrl+C,
+        // Ctrl+Shift+A (VS Code), Ctrl+Alt+letter (some intl keyboards / AltGr).
+        // Win-combos are intentionally NOT flagged — the user chose them.
+        if ((realMods & NativeMethods.MOD_CONTROL) != 0 &&
+            (realMods & NativeMethods.MOD_WIN) == 0 &&
+            isLetter)
+            return true;
+
+        return false;
+    }
+
+    /// <summary>
+    /// Whether the given VK is a distinct left/right modifier key. These
+    /// are permitted as bare hotkeys because (a) they're unlikely to
+    /// conflict with typing (nobody types "right ctrl" into a document)
+    /// and (b) the low-latency PTT path specifically supports them so
+    /// users can match their Discord binding.
+    /// </summary>
+    internal static bool IsBareModifierVk(uint vk) =>
+        vk is 0xA0 or 0xA1 or 0xA2 or 0xA3 or 0xA4 or 0xA5 or 0x5B or 0x5C;
 
     private static uint KeyNameToVk(string keyName)
     {
@@ -319,6 +392,16 @@ internal sealed class Config
             "SCROLLLOCK" => 0x91,
             "PRINTSCREEN" => 0x2C,
             "PAUSE" => 0x13,
+            // Side-specific modifiers — usable as bare hotkeys in low-latency
+            // PTT mode (Discord-style "right ctrl alone" bindings).
+            "LCTRL" or "LCONTROL" => 0xA2,
+            "RCTRL" or "RCONTROL" => 0xA3,
+            "LSHIFT" => 0xA0,
+            "RSHIFT" => 0xA1,
+            "LALT" or "LMENU" => 0xA4,
+            "RALT" or "RMENU" => 0xA5,
+            "LWIN" => 0x5B,
+            "RWIN" => 0x5C,
             "NUMPAD0" => 0x60,
             "NUMPAD1" => 0x61,
             "NUMPAD2" => 0x62,

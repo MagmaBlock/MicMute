@@ -12,7 +12,9 @@ internal sealed class HotkeyDialog : Form
 
     public string ResultHotkey { get; private set; } = "";
 
-    public HotkeyDialog(string currentHotkey)
+    public HotkeyDialog(string currentHotkey) : this(currentHotkey, lowLatencyPttActive: false) { }
+
+    public HotkeyDialog(string currentHotkey, bool lowLatencyPttActive)
     {
         Text = "MicMute \u2014 Change Hotkey";
         TopMost = true;
@@ -62,11 +64,30 @@ internal sealed class HotkeyDialog : Form
         };
         Controls.Add(hintLabel);
 
+        // Guidance for the LowLatencyPtt flow: bare modifier capture is
+        // blocked by the key-down filter below, so point the user at the
+        // manual-type path for bindings like RCtrl. Inserted between the
+        // main hint and the button row; shifts only the button row down.
+        int buttonY = 124;
+        if (lowLatencyPttActive)
+        {
+            var barehintLabel = new Label
+            {
+                Text = "Bare keys (RCtrl, RShift, \u2026): click Type manually, then type the name.",
+                ForeColor = Color.FromArgb(0x88, 0x88, 0x88),
+                AutoSize = true,
+                Location = new Point(16, 118),
+            };
+            Controls.Add(barehintLabel);
+            buttonY = 146;
+            ClientSize = new Size(ClientSize.Width, ClientSize.Height + 22);
+        }
+
         var btnRaw = new Button
         {
             Text = "Type manually",
             Width = 100,
-            Location = new Point(16, 124),
+            Location = new Point(16, buttonY),
         };
         btnRaw.Click += (_, _) =>
         {
@@ -81,7 +102,7 @@ internal sealed class HotkeyDialog : Form
         {
             Text = "OK",
             Width = 80,
-            Location = new Point(130, 124),
+            Location = new Point(130, buttonY),
             DialogResult = DialogResult.OK,
         };
         btnOK.Click += (_, _) =>
@@ -102,7 +123,7 @@ internal sealed class HotkeyDialog : Form
         {
             Text = "Cancel",
             Width = 80,
-            Location = new Point(218, 124),
+            Location = new Point(218, buttonY),
             DialogResult = DialogResult.Cancel,
         };
         Controls.Add(btnCancel);

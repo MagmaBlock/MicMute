@@ -17,6 +17,7 @@ internal sealed class SettingsDialog : Form
     private readonly CheckBox _chkMuteLock;
     private readonly CheckBox _chkMiddleClick;
     private readonly CheckBox _chkRunAtStartup;
+    private readonly CheckBox _chkLowLatencyPtt;
     private readonly ComboBox _ddlStartMuted;
 
     // Hotkeys
@@ -25,13 +26,13 @@ internal sealed class SettingsDialog : Form
 
     // Custom files
     private readonly TextBox _edtIconMuted;
-    private readonly Label _lblIconMuted;
+    private readonly TextBox _lblIconMuted;
     private readonly TextBox _edtIconActive;
-    private readonly Label _lblIconActive;
+    private readonly TextBox _lblIconActive;
     private readonly TextBox _edtMuteSound;
-    private readonly Label _lblMuteSound;
+    private readonly TextBox _lblMuteSound;
     private readonly TextBox _edtUnmuteSound;
-    private readonly Label _lblUnmuteSound;
+    private readonly TextBox _lblUnmuteSound;
 
     public SettingsDialog(Config config, Action onApply)
     {
@@ -61,12 +62,16 @@ internal sealed class SettingsDialog : Form
         _capturedDeafenHK = config.DeafenHotkey;
         _edtDeafenHK = new TextBox
         {
-            Text = string.IsNullOrEmpty(config.DeafenHotkey) ? "(press a key combo)" : Config.HotkeyToReadable(config.DeafenHotkey),
+            Text = string.IsNullOrEmpty(config.DeafenHotkey) ? "(not set)" : Config.HotkeyToReadable(config.DeafenHotkey),
             Width = 160,
             ReadOnly = true,
             BackColor = Color.White,
+            ForeColor = string.IsNullOrEmpty(config.DeafenHotkey) ? Color.FromArgb(0x88, 0x88, 0x88) : Color.Black,
             Location = new Point(deafenLabel.Right + 8, y - 1),
         };
+        // Visual cue while recording a new combo.
+        _edtDeafenHK.Enter += (_, _) => _edtDeafenHK.BackColor = Color.FromArgb(0xFF, 0xF8, 0xDC);
+        _edtDeafenHK.Leave += (_, _) => _edtDeafenHK.BackColor = Color.White;
         _edtDeafenHK.KeyDown += (_, e) =>
         {
             e.SuppressKeyPress = true;
@@ -86,16 +91,22 @@ internal sealed class SettingsDialog : Form
 
             _capturedDeafenHK = prefix + keyName;
             _edtDeafenHK.Text = Config.HotkeyToReadable(_capturedDeafenHK);
+            _edtDeafenHK.ForeColor = Color.Black;
         };
         Controls.Add(_edtDeafenHK);
 
         var btnClearHK = new Button { Text = "Clear", Width = 45, Location = new Point(_edtDeafenHK.Right + 4, y - 1) };
-        btnClearHK.Click += (_, _) => { _capturedDeafenHK = ""; _edtDeafenHK.Text = "(none)"; };
+        btnClearHK.Click += (_, _) =>
+        {
+            _capturedDeafenHK = "";
+            _edtDeafenHK.Text = "(not set)";
+            _edtDeafenHK.ForeColor = Color.FromArgb(0x88, 0x88, 0x88);
+        };
         Controls.Add(btnClearHK);
 
         var hkHintLabel = new Label
         {
-            Text = "Click the box and press your desired key combo",
+            Text = "Click the box and press a key combo to bind or change",
             AutoSize = true,
             ForeColor = Color.FromArgb(0x88, 0x88, 0x88),
             Location = new Point(indent, y + 22),
@@ -118,6 +129,7 @@ internal sealed class SettingsDialog : Form
 
         _chkMuteLock = AddCheckBox("Mute Lock (prevent external apps from changing mute state)", indent, ref y, config.MuteLock);
         _chkMiddleClick = AddCheckBox("Middle-click tray icon to toggle Toggle/PTT mode", indent, ref y, config.MiddleClickToggle);
+        _chkLowLatencyPtt = AddCheckBox("Low-latency PTT (fullscreen-safe; allows bare keys)", indent, ref y, config.LowLatencyPtt);
 
         string startupPath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.Startup), "MicMute.lnk");
@@ -152,9 +164,19 @@ internal sealed class SettingsDialog : Form
         (_edtUnmuteSound, _lblUnmuteSound) = AddFileRow("Unmute sound:", config.UnmuteSound, "Sound files (*.wav)|*.wav", indent, ref y);
 
         // ── Buttons ──
-        y += 8;
-        var btnGitHub = new Button { Text = "GitHub", Width = 80, Location = new Point(leftMargin, y) };
-        btnGitHub.Click += (_, _) =>
+        y += 12;
+        const int dialogWidth = 498;
+        int rightEdge = dialogWidth - leftMargin;
+
+        // Auxiliary links (left) — subtle, navigation-style
+        var lnkGitHub = new LinkLabel
+        {
+            Text = "GitHub",
+            AutoSize = true,
+            Location = new Point(leftMargin, y + 6),
+            LinkBehavior = LinkBehavior.HoverUnderline,
+        };
+        lnkGitHub.LinkClicked += (_, _) =>
         {
             using var proc = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
             {
@@ -162,34 +184,59 @@ internal sealed class SettingsDialog : Form
                 UseShellExecute = true,
             });
         };
-        Controls.Add(btnGitHub);
+        Controls.Add(lnkGitHub);
 
-        var btnUpdate = new Button { Text = "Update", Width = 65, Location = new Point(btnGitHub.Right + 6, y) };
-        btnUpdate.Click += (_, _) =>
+        var lnkHelp = new LinkLabel
+        {
+            Text = "Help",
+            AutoSize = true,
+            Location = new Point(lnkGitHub.Right + 14, y + 6),
+            LinkBehavior = LinkBehavior.HoverUnderline,
+        };
+        lnkHelp.LinkClicked += (_, _) => HelpWindow.ShowInstance();
+        Controls.Add(lnkHelp);
+
+        var lnkUpdate = new LinkLabel
+        {
+            Text = "Check for updates",
+            AutoSize = true,
+            Location = new Point(lnkHelp.Right + 14, y + 6),
+            LinkBehavior = LinkBehavior.HoverUnderline,
+        };
+        lnkUpdate.LinkClicked += (_, _) =>
         {
             using var dlg = new UpdateDialog();
             dlg.ShowDialog(this);
         };
-        Controls.Add(btnUpdate);
+        Controls.Add(lnkUpdate);
 
-        var btnHelp = new Button { Text = "Help", Width = 55, Location = new Point(btnUpdate.Right + 6, y) };
-        btnHelp.Click += (_, _) => HelpWindow.ShowInstance();
-        Controls.Add(btnHelp);
+        // Action buttons (right) — anchored to the right edge. Width is
+        // shrunk if the LinkLabel row runs wide (long locales, scaled DPI)
+        // so left and right groups never overlap.
+        const int btnMinWidth = 64;
+        const int btnDefaultWidth = 80;
+        const int btnGap = 6;
+        const int groupGap = 16;
+        int leftGroupRight = lnkUpdate.Right;
+        int rightGroupAvailable = rightEdge - leftGroupRight - groupGap;
+        int btnWidth = Math.Min(btnDefaultWidth,
+            Math.Max(btnMinWidth, (rightGroupAvailable - 2 * btnGap) / 3));
 
-        var btnOK = new Button { Text = "OK", Width = 80, Location = new Point(234, y) };
-        btnOK.Click += (_, _) => { ApplySettings(); Close(); };
-        Controls.Add(btnOK);
-
-        var btnApply = new Button { Text = "Apply", Width = 80, Location = new Point(322, y) };
-        btnApply.Click += (_, _) => ApplySettings();
-        Controls.Add(btnApply);
-
-        var btnCancel = new Button { Text = "Cancel", Width = 80, Location = new Point(410, y) };
+        var btnCancel = new Button { Text = "Cancel", Width = btnWidth, Location = new Point(rightEdge - btnWidth, y) };
         btnCancel.Click += (_, _) => Close();
         Controls.Add(btnCancel);
         CancelButton = btnCancel;
 
-        ClientSize = new Size(498, y + 38);
+        var btnApply = new Button { Text = "Apply", Width = btnWidth, Location = new Point(btnCancel.Left - btnGap - btnWidth, y) };
+        btnApply.Click += (_, _) => ApplySettings();
+        Controls.Add(btnApply);
+
+        var btnOK = new Button { Text = "OK", Width = btnWidth, Location = new Point(btnApply.Left - btnGap - btnWidth, y) };
+        btnOK.Click += (_, _) => { ApplySettings(); Close(); };
+        Controls.Add(btnOK);
+        AcceptButton = btnOK;
+
+        ClientSize = new Size(dialogWidth, y + 38);
     }
 
     private void ApplySettings()
@@ -200,6 +247,7 @@ internal sealed class SettingsDialog : Form
             _config.OsdDuration = Math.Max(500, dur);
         _config.MuteLock = _chkMuteLock.Checked;
         _config.MiddleClickToggle = _chkMiddleClick.Checked;
+        _config.LowLatencyPtt = _chkLowLatencyPtt.Checked;
 
         _config.StartMuted = _ddlStartMuted.SelectedIndex switch
         {
@@ -255,12 +303,14 @@ internal sealed class SettingsDialog : Form
         Controls.Add(label);
         y += label.Height + 3;
 
-        // Separator line
+        // Separator line — extends to near the right margin so the section
+        // header visually spans the dialog's content width (was 410, leaving
+        // ~70px of dead space on the right).
         var sep = new Label
         {
             BorderStyle = BorderStyle.Fixed3D,
             Height = 1,
-            Width = 410,
+            Width = 466,
             Location = new Point(x, y),
         };
         Controls.Add(sep);
@@ -281,28 +331,51 @@ internal sealed class SettingsDialog : Form
         return chk;
     }
 
-    private (TextBox edit, Label lbl) AddFileRow(string labelText, string currentPath, string filter, int x, ref int y)
+    private (TextBox edit, TextBox display) AddFileRow(string labelText, string currentPath, string filter, int x, ref int y)
     {
-        var lbl = new Label { Text = labelText, Width = 75, AutoSize = false, Location = new Point(x, y + 4) };
+        // Layout: [label 80w] [filename textbox fills] [Browse 65w] [Clear 45w]
+        // Right edge matches the section separator (x=16 + 466 = 482).
+        const int labelWidth = 80;
+        const int browseWidth = 65;
+        const int clearWidth = 45;
+        const int gap = 4;
+        const int rightEdge = 482;
+
+        int clearX = rightEdge - clearWidth;
+        int browseX = clearX - gap - browseWidth;
+        int textX = x + labelWidth;
+        int textW = browseX - gap - textX;
+
+        var lbl = new Label
+        {
+            Text = labelText,
+            Width = labelWidth,
+            AutoSize = false,
+            Location = new Point(x, y + 4),
+        };
         Controls.Add(lbl);
 
+        // Read-only display box matches the Deafen hotkey row styling.
+        var fileDisplay = new TextBox
+        {
+            Text = FileLabel(currentPath),
+            ReadOnly = true,
+            BackColor = Color.White,
+            ForeColor = string.IsNullOrEmpty(currentPath) ? Color.FromArgb(0x88, 0x88, 0x88) : Color.Black,
+            Width = textW,
+            Location = new Point(textX, y - 1),
+        };
+        Controls.Add(fileDisplay);
+
+        // Hidden field: stores the full path (display shows only the filename).
         var edit = new TextBox { Text = currentPath, Visible = false, Width = 0, Location = new Point(0, 0) };
         Controls.Add(edit);
 
-        var btnBrowse = new Button { Text = "Browse\u2026", Width = 65, Location = new Point(106, y) };
+        var btnBrowse = new Button { Text = "Browse\u2026", Width = browseWidth, Location = new Point(browseX, y - 1) };
         Controls.Add(btnBrowse);
 
-        var btnClear = new Button { Text = "Clear", Width = 45, Location = new Point(btnBrowse.Right + 3, y) };
+        var btnClear = new Button { Text = "Clear", Width = clearWidth, Location = new Point(clearX, y - 1) };
         Controls.Add(btnClear);
-
-        var fileLbl = new Label
-        {
-            Text = FileLabel(currentPath),
-            ForeColor = Color.FromArgb(0x55, 0x55, 0x55),
-            AutoSize = true,
-            Location = new Point(btnClear.Right + 6, y + 4),
-        };
-        Controls.Add(fileLbl);
 
         btnBrowse.Click += (_, _) =>
         {
@@ -310,18 +383,20 @@ internal sealed class SettingsDialog : Form
             if (ofd.ShowDialog() == DialogResult.OK)
             {
                 edit.Text = ofd.FileName;
-                fileLbl.Text = FileLabel(ofd.FileName);
+                fileDisplay.Text = FileLabel(ofd.FileName);
+                fileDisplay.ForeColor = Color.Black;
             }
         };
 
         btnClear.Click += (_, _) =>
         {
             edit.Text = "";
-            fileLbl.Text = "(none)";
+            fileDisplay.Text = "(none)";
+            fileDisplay.ForeColor = Color.FromArgb(0x88, 0x88, 0x88);
         };
 
         y += 30;
-        return (edit, fileLbl);
+        return (edit, fileDisplay);
     }
 
     private static string FileLabel(string path)
