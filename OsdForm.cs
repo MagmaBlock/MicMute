@@ -92,19 +92,30 @@ internal sealed class OsdForm : Form
             int w = 12 + 14 + (int)labelSize.Width + 16;
             int h = 32;
 
-            // Position above taskbar
+            // Position above taskbar — working-area corner is the safe
+            // default for any taskbar orientation.
             var screen = Screen.PrimaryScreen ?? Screen.AllScreens[0];
-            int xPos = screen.WorkingArea.Right - w - 12;
-            int yPos = screen.WorkingArea.Bottom - h - 8;
+            var workArea = screen.WorkingArea;
+            int xPos = workArea.Right - w - 12;
+            int yPos = workArea.Bottom - h - 8;
 
-            // Try to find taskbar for more precise positioning
+            // Try to find the taskbar for pixel-perfect anchoring (bottom
+            // taskbar only — the default Windows layout). Top / left / right
+            // taskbars land the OSD off-screen with a naive rect.Top anchor,
+            // so we only honour the precise placement when it stays within
+            // the working area; otherwise the working-area fallback wins.
             nint trayHwnd = NativeMethods.FindWindow("Shell_TrayWnd", "");
-            if (trayHwnd != 0)
+            if (trayHwnd != 0 &&
+                NativeMethods.GetWindowRect(trayHwnd, out var rect))
             {
-                if (NativeMethods.GetWindowRect(trayHwnd, out var rect))
+                int anchoredX = rect.Right - w - 12;
+                int anchoredY = rect.Top - h - 8;
+                if (anchoredY >= workArea.Top &&
+                    anchoredX >= workArea.Left &&
+                    anchoredX + w <= workArea.Right)
                 {
-                    xPos = rect.Right - w - 12;
-                    yPos = rect.Top - h - 8;
+                    xPos = anchoredX;
+                    yPos = anchoredY;
                 }
             }
 

@@ -1,5 +1,3 @@
-using System.Runtime.InteropServices;
-
 namespace MicMute;
 
 /// <summary>
@@ -51,6 +49,10 @@ internal sealed class TrayApp : Form
 
     // Reusable bold font for menu title (disposed in cleanup)
     private Font _menuTitleFont;
+
+    // One-shot set — we log a custom-sound failure once per file path so a
+    // broken MuteSound doesn't spam the log on every toggle.
+    private readonly HashSet<string> _playSoundFailed = new(StringComparer.OrdinalIgnoreCase);
 
     private bool _disposed;
     private bool _shuttingDown;
@@ -230,13 +232,22 @@ internal sealed class TrayApp : Form
         PlayFeedback();
     }
 
-    private void SetMuteState(bool muted, bool quiet = false)
+    /// <summary>
+    /// Apply a mute state. Returns true on success (or no-op), false if the
+    /// Core Audio call failed. Callers MUST check the return value on paths
+    /// where a silent failure would lie to the user — deafen entry and PTT
+    /// press/release being the two catastrophic ones: the tray would show
+    /// "muted" while the mic is actually hot, or vice-versa.
+    /// </summary>
+    private bool SetMuteState(bool muted, bool quiet = false)
     {
-        if (!_audio.HasEndpoint || _muted == muted)
-            return;
+        if (!_audio.HasEndpoint)
+            return false;
+        if (_muted == muted)
+            return true;
 
         if (!_audio.SetMute(muted))
-            return;
+            return false;
 
         _muted = muted;
         _config.SaveLastMuteState(_muted);
@@ -248,6 +259,7 @@ internal sealed class TrayApp : Form
             ShowOsd();
             PlayFeedback();
         }
+        return true;
     }
 
     // ── Sound Feedback ───────────────────────────────────────────────────
@@ -264,6 +276,16 @@ internal sealed class TrayApp : Form
             if (!NativeMethods.PlaySound(soundFile, 0,
                 NativeMethods.SND_FILENAME | NativeMethods.SND_ASYNC | NativeMethods.SND_NODEFAULT))
             {
+                // Surface the first failure per file so a corrupt/unsupported WAV
+                // doesn't silently fall back to beep forever. HashSet.Add returns
+                // true only on the first occurrence — subsequent calls are quiet.
+                if (_playSoundFailed.Add(soundFile))
+                {
+                    Log.Warn($"PlaySound failed for '{soundFile}'; falling back to beep");
+                    ShowTimedTooltip(
+                        "Custom sound couldn't play:\n" + Path.GetFileName(soundFile) +
+                        "\nFalling back to the built-in beep.", 4000);
+                }
                 PlayToneSequence(_muted);
             }
         }
@@ -401,8 +423,17 @@ internal sealed class TrayApp : Form
                         _lockDebounce = false;
                         return;
                     }
-                    _audio.SetMute(_muted);
-                    _lockDebounce = true;
+                    if (_audio.SetMute(_muted))
+                    {
+                        _lockDebounce = true;
+                    }
+                    else
+                    {
+                        // Don't set the debounce on failure — we want the next
+                        // tick to retry the fight-back instead of silently
+                        // conceding the external state for a full 15s cycle.
+                        Log.Warn("MuteLock fight-back SetMute failed; will retry on next sync tick");
+                    }
                 }
                 else
                 {
@@ -459,7 +490,10 @@ internal sealed class TrayApp : Form
         bool wasPolling = _pttTimer?.Enabled == true;
         _pttTimer?.Stop();
         if (!_shuttingDown && wasPolling && _audio.HasEndpoint && !_muted)
-            SetMuteState(true, true);
+        {
+            if (!SetMuteState(true, true))
+                Log.Warn("PTT safety re-mute failed during hotkey unregister — mic may still be hot");
+        }
     }
 
     private void RegisterDeafenHotkey()
@@ -528,7 +562,16 @@ internal sealed class TrayApp : Form
 
     private void HandlePushToTalk()
     {
-        SetMuteState(false, true); // unmute while held
+        // PTT press MUST unmute — if it silently fails, the user speaks into
+        // a dead mic and nobody hears them. Surface it immediately rather
+        // than falling into the poll and pretending everything's fine.
+        if (!SetMuteState(false, true))
+        {
+            Log.Error("PTT unmute failed — mic still muted while key held");
+            ShowTimedTooltip(
+                "Couldn't unmute microphone.\nTry Tray \u2192 Reinit Mic.", 4000);
+            return;
+        }
 
         // Cache the VK for polling (avoids re-parsing on every timer tick)
         if (!Config.ParseHotkey(_config.Hotkey, out _, out uint vk))
@@ -555,7 +598,20 @@ internal sealed class TrayApp : Form
             {
                 _pttTimer.Stop();
                 if (_config.Mode == "push-to-talk") // guard against mode switch while held
-                    SetMuteState(true, true);
+                {
+                    // Re-mute on key release MUST succeed — silent failure
+                    // leaves a hot mic open after the user thinks PTT ended.
+                    // Flash the tray and surface a tooltip even in quiet mode
+                    // because this is the "mic still live after PTT" bug.
+                    if (!SetMuteState(true, true))
+                    {
+                        Log.Error("PTT re-mute on key release failed — mic may still be hot");
+                        FlashIcon();
+                        ShowTimedTooltip(
+                            "Couldn't re-mute microphone after PTT.\n" +
+                            "Mic may still be open \u2014 verify in Windows.", 4000);
+                    }
+                }
             }
         }
         catch (Exception ex)
@@ -574,12 +630,21 @@ internal sealed class TrayApp : Form
 
         if (!_deafened)
         {
-            // Enter deafen
+            // Enter deafen — CRITICAL: if the mic-mute step fails, ABORT.
+            // We must never show "DEAFENED — mic + speakers muted" while the
+            // mic is actually live. Speaker-mute is skipped and _deafened stays
+            // false so the tooltip tells the truth and the user can retry.
             try { _speakerWasMuted = AudioManager.GetSpeakerMute(); }
             catch (Exception ex) { Log.Warn("GetSpeakerMute failed, assuming unmuted: " + ex.Message); _speakerWasMuted = false; }
 
-            if (!_muted)
-                SetMuteState(true);
+            if (!_muted && !SetMuteState(true))
+            {
+                Log.Error("Deafen aborted: mic mute failed — NOT muting speakers, NOT setting deafen flag");
+                ShowTimedTooltip(
+                    "Couldn't mute microphone \u2014 deafen aborted.\nTry Tray \u2192 Reinit Mic.", 5000);
+                return;
+            }
+
             try { AudioManager.SetSpeakerMute(true); }
             catch (Exception ex) { Log.Error("SetSpeakerMute(true) failed during deafen-enter", ex); }
 
@@ -590,15 +655,20 @@ internal sealed class TrayApp : Form
         }
         else
         {
-            // Exit deafen
-            SetMuteState(false);
+            // Exit deafen — best-effort. If mic-unmute fails the user still
+            // wants speakers restored, and they'll see a warning about the mic.
+            bool micUnmuted = SetMuteState(false);
             try { AudioManager.SetSpeakerMute(_speakerWasMuted); }
             catch (Exception ex) { Log.Error("SetSpeakerMute restore failed during deafen-exit", ex); }
 
             _deafened = false;
             _tooltipDirty = true;
             SetTrayIcon();
-            ShowTimedTooltip("Undeafened \u2014 audio restored", 3000);
+            if (micUnmuted)
+                ShowTimedTooltip("Undeafened \u2014 audio restored", 3000);
+            else
+                ShowTimedTooltip(
+                    "Undeafened, but microphone unmute failed.\nTry Tray \u2192 Reinit Mic.", 5000);
         }
     }
 
@@ -608,7 +678,13 @@ internal sealed class TrayApp : Form
     {
         _config.Mode = newMode;
         if (newMode == "push-to-talk")
-            SetMuteState(true, true);
+        {
+            // Best-effort prep-mute on mode switch — a silent failure here
+            // would be caught by the next sync tick anyway, and the user
+            // hasn't pressed the PTT key yet, so no "lying UI" risk.
+            if (!SetMuteState(true, true))
+                Log.Warn("Prep-mute for PTT mode switch failed; sync timer will reconcile");
+        }
         RegisterMainHotkey();
         BuildTrayMenu();
         _tooltipDirty = true;
