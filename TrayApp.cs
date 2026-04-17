@@ -53,6 +53,7 @@ internal sealed class TrayApp : Form
     private Font _menuTitleFont;
 
     private bool _disposed;
+    private bool _shuttingDown;
 
     public TrayApp()
     {
@@ -359,6 +360,19 @@ internal sealed class TrayApp : Form
                 // Device went away
                 _audio.Release();
                 _muted = false;
+
+                // If the user was deafened, mic loss shouldn't leave them
+                // stuck with speakers muted and no UI affordance to recover.
+                // Restore speakers to their pre-deafen state and clear the
+                // deafen flag so the tooltip doesn't contradict itself.
+                if (_deafened)
+                {
+                    try { AudioManager.SetSpeakerMute(_speakerWasMuted); }
+                    catch (Exception ex) { Log.Warn("SetSpeakerMute restore on device-loss failed: " + ex.Message); }
+                    _deafened = false;
+                    _tooltipDirty = true;
+                }
+
                 SyncTrayIcon();
                 ShowTimedTooltip("Microphone disconnected.\nWill auto-reconnect when available.", 5000);
                 return;
@@ -428,9 +442,11 @@ internal sealed class TrayApp : Form
         // release event will never arrive — it's bound to a different VK now,
         // or no VK at all. Stop the poll AND re-mute so the mic doesn't stay
         // open. Covers both hotkey rebind and mode-switch while held.
+        // Skipped during shutdown — ExitApplication owns mic state on exit
+        // (F-10: unmute so user isn't stuck muted in Discord/Zoom).
         bool wasPolling = _pttTimer?.Enabled == true;
         _pttTimer?.Stop();
-        if (wasPolling && _audio.HasEndpoint && !_muted)
+        if (!_shuttingDown && wasPolling && _audio.HasEndpoint && !_muted)
             SetMuteState(true, true);
     }
 
@@ -772,24 +788,37 @@ internal sealed class TrayApp : Form
 
     private void ApplyStartupMutePreference()
     {
+        // Attempt the startup state change, then re-read from the device so
+        // the UI doesn't claim a mute state the hardware didn't actually
+        // accept (rare, but possible on a device that's initialized but
+        // flaky). Sync timer will eventually correct on its own; this keeps
+        // the tray/OSD consistent from the first frame.
+        bool targetKnown = true;
+        bool target = _muted;
+
         switch (_config.StartMuted)
         {
             case "yes" when !_muted:
-                _audio.SetMute(true);
-                _muted = true;
+                target = true;
                 break;
             case "unmuted" when _muted:
-                _audio.SetMute(false);
-                _muted = false;
+                target = false;
                 break;
-            case "last":
-                if (_config.LastMuteState != _muted)
-                {
-                    _audio.SetMute(_config.LastMuteState);
-                    _muted = _config.LastMuteState;
-                }
+            case "last" when _config.LastMuteState != _muted:
+                target = _config.LastMuteState;
+                break;
+            default:
+                targetKnown = false;
                 break;
         }
+
+        if (!targetKnown)
+            return;
+
+        if (_audio.SetMute(target))
+            _muted = target;
+        else
+            _muted = _audio.GetMute() ?? _muted;
     }
 
     // ── Dialogs ──────────────────────────────────────────────────────────
@@ -890,6 +919,10 @@ internal sealed class TrayApp : Form
 
     private void ExitApplication()
     {
+        // Claim ownership of exit-time mute state before Dispose chain runs.
+        // UnregisterMainHotkey skips its PTT re-mute safety net when this is set.
+        _shuttingDown = true;
+
         // Unmute on exit (F-10) + restore speakers if deafened (F-20)
         if (_deafened)
         {
@@ -907,6 +940,10 @@ internal sealed class TrayApp : Form
     {
         if (!_disposed && disposing)
         {
+            // Belt-and-suspenders: if something disposes us without going
+            // through ExitApplication, the shutdown guard still applies.
+            _shuttingDown = true;
+
             // Unregister hotkeys
             UnregisterMainHotkey();
             UnregisterDeafenHotkey();

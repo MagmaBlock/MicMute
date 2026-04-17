@@ -16,7 +16,11 @@ internal static class Program
         // launch exits silently instead of racing on the hotkey + INI file.
         // Post-update: wait up to 5 s for the old exe to release the mutex during
         // the self-replace handoff; normal launches return immediately.
-        using var mutex = new Mutex(false, @"Global\MicMute_SingleInstance");
+        //
+        // Local\ namespace = per-session. Each Windows user (fast-user-switching,
+        // terminal server) gets their own tray app. Global\ would block all but
+        // the first user on a multi-user machine.
+        using var mutex = new Mutex(false, @"Local\MicMute_SingleInstance");
         bool acquired;
         try
         {

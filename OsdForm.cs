@@ -78,51 +78,64 @@ internal sealed class OsdForm : Form
 
     private void ShowInternal(string displayText, int durationMs)
     {
-        // Measure text
-        using var g = CreateGraphics();
-        var labelSize = g.MeasureString(displayText, s_labelFont);
-        int w = 12 + 14 + (int)labelSize.Width + 16;
-        int h = 32;
-
-        // Position above taskbar
-        var screen = Screen.PrimaryScreen ?? Screen.AllScreens[0];
-        int xPos = screen.WorkingArea.Right - w - 12;
-        int yPos = screen.WorkingArea.Bottom - h - 8;
-
-        // Try to find taskbar for more precise positioning
-        nint trayHwnd = NativeMethods.FindWindow("Shell_TrayWnd", "");
-        if (trayHwnd != 0)
-        {
-            if (NativeMethods.GetWindowRect(trayHwnd, out var rect))
-            {
-                xPos = rect.Right - w - 12;
-                yPos = rect.Top - h - 8;
-            }
-        }
-
-        SetBounds(xPos, yPos, w, h);
-
-        // Try Win11 rounded corners
+        // Defensive: any failure in measurement/positioning should not kill
+        // the OSD pipeline or propagate to the caller (a hotkey handler).
+        // Log and silently skip the notification — next toggle will try again.
         try
         {
-            int preference = NativeMethods.DWMWCP_ROUND;
-            NativeMethods.DwmSetWindowAttribute(Handle,
-                NativeMethods.DWMWA_WINDOW_CORNER_PREFERENCE, ref preference, sizeof(int));
+            if (_disposed || IsDisposed)
+                return;
+
+            // Measure text
+            using var g = CreateGraphics();
+            var labelSize = g.MeasureString(displayText, s_labelFont);
+            int w = 12 + 14 + (int)labelSize.Width + 16;
+            int h = 32;
+
+            // Position above taskbar
+            var screen = Screen.PrimaryScreen ?? Screen.AllScreens[0];
+            int xPos = screen.WorkingArea.Right - w - 12;
+            int yPos = screen.WorkingArea.Bottom - h - 8;
+
+            // Try to find taskbar for more precise positioning
+            nint trayHwnd = NativeMethods.FindWindow("Shell_TrayWnd", "");
+            if (trayHwnd != 0)
+            {
+                if (NativeMethods.GetWindowRect(trayHwnd, out var rect))
+                {
+                    xPos = rect.Right - w - 12;
+                    yPos = rect.Top - h - 8;
+                }
+            }
+
+            SetBounds(xPos, yPos, w, h);
+
+            // Try Win11 rounded corners
+            try
+            {
+                int preference = NativeMethods.DWMWCP_ROUND;
+                NativeMethods.DwmSetWindowAttribute(Handle,
+                    NativeMethods.DWMWA_WINDOW_CORNER_PREFERENCE, ref preference, sizeof(int));
+            }
+            catch
+            {
+                // Older Windows — ignore
+            }
+
+            Opacity = 235.0 / 255.0;
+            Invalidate();
+
+            if (!Visible)
+                Show();
+
+            _dismissTimer.Stop();
+            _dismissTimer.Interval = durationMs;
+            _dismissTimer.Start();
         }
-        catch
+        catch (Exception ex)
         {
-            // Older Windows — ignore
+            Log.Warn("OsdForm.ShowInternal failed: " + ex.Message);
         }
-
-        Opacity = 235.0 / 255.0;
-        Invalidate();
-
-        if (!Visible)
-            Show();
-
-        _dismissTimer.Stop();
-        _dismissTimer.Interval = durationMs;
-        _dismissTimer.Start();
     }
 
     protected override void OnPaint(PaintEventArgs e)

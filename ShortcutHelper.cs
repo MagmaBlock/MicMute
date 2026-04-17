@@ -78,12 +78,12 @@ internal static class ShortcutHelper
                 }
                 finally
                 {
-                    Marshal.ReleaseComObject(shortcut);
+                    Marshal.FinalReleaseComObject(shortcut);
                 }
             }
             finally
             {
-                Marshal.ReleaseComObject(shell);
+                Marshal.FinalReleaseComObject(shell);
             }
         }
         catch (Exception ex)

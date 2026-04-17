@@ -189,10 +189,24 @@ internal sealed class Config
         if (prefix.Contains('^')) modifiers |= NativeMethods.MOD_CONTROL;
         if (prefix.Contains('!')) modifiers |= NativeMethods.MOD_ALT;
         if (prefix.Contains('+')) modifiers |= NativeMethods.MOD_SHIFT;
+
+        // Reject modifier-less hotkeys (e.g. bare "a") — they would bind
+        // globally and hijack every keypress of that key in every app.
+        // Function keys (F1-F24) are allowed bare since they're rarely
+        // typed in normal use. Everything else needs at least Ctrl/Alt/
+        // Shift/Win.
+        uint realMods = modifiers; // before MOD_NOREPEAT is added
         modifiers |= NativeMethods.MOD_NOREPEAT;
 
         vk = KeyNameToVk(keyName);
-        return vk != 0;
+        if (vk == 0)
+            return false;
+
+        bool isFunctionKey = vk >= 0x70 && vk <= 0x87; // VK_F1..VK_F24
+        if (realMods == 0 && !isFunctionKey)
+            return false;
+
+        return true;
     }
 
     private static uint KeyNameToVk(string keyName)

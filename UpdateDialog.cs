@@ -36,6 +36,13 @@ internal sealed class UpdateDialog : Form
     private const string AppName = "MicMute";
     private const string GitHubRepo = "itsnateai/MicMute";
 
+    // Defense-in-depth size caps — prevent OOM/disk-fill if an attacker-
+    // controlled release ever serves a pathologically large response.
+    // Legitimate values are much smaller than these ceilings.
+    private const long MaxJsonBytes = 1_048_576;        //  1 MB for GitHub API JSON
+    private const long MaxHashFileBytes = 65_536;       // 64 KB for SHA256SUMS
+    private const long MaxExeBytes = 209_715_200;       // 200 MB for MicMute.exe
+
     public UpdateDialog()
     {
         Text = $"{AppName} — Update";
@@ -158,6 +165,7 @@ internal sealed class UpdateDialog : Form
         {
             var response = await _http.GetAsync(
                 $"https://api.github.com/repos/{GitHubRepo}/releases/latest",
+                HttpCompletionOption.ResponseHeadersRead,
                 _cts.Token);
 
             if (response.StatusCode == System.Net.HttpStatusCode.Forbidden)
@@ -178,7 +186,13 @@ internal sealed class UpdateDialog : Form
 
             response.EnsureSuccessStatusCode();
 
-            var json = await response.Content.ReadAsStringAsync(_cts.Token);
+            if (response.Content.Headers.ContentLength is long jsonLen && jsonLen > MaxJsonBytes)
+            {
+                ShowError("Unexpected response from GitHub.", "Release metadata is larger than expected.");
+                return;
+            }
+
+            var json = await ReadBoundedStringAsync(response, MaxJsonBytes, _cts.Token);
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
 
@@ -309,7 +323,17 @@ internal sealed class UpdateDialog : Form
                 _lblStatus.Text = "Verifying integrity...";
                 try
                 {
-                    var hashContent = await _http.GetStringAsync(_hashFileUrl, ct);
+                    using var hashResponse = await _http.GetAsync(
+                        _hashFileUrl, HttpCompletionOption.ResponseHeadersRead, ct);
+                    hashResponse.EnsureSuccessStatusCode();
+                    if (hashResponse.Content.Headers.ContentLength is long hashLen && hashLen > MaxHashFileBytes)
+                    {
+                        TryDelete(newPath);
+                        ShowError("Update integrity check failed.",
+                            "Checksum file is larger than expected.");
+                        return;
+                    }
+                    var hashContent = await ReadBoundedStringAsync(hashResponse, MaxHashFileBytes, ct);
                     string expectedHash = null;
                     foreach (var line in hashContent.Split('\n', StringSplitOptions.RemoveEmptyEntries))
                     {
@@ -412,6 +436,13 @@ internal sealed class UpdateDialog : Form
         response.EnsureSuccessStatusCode();
 
         var totalBytes = response.Content.Headers.ContentLength ?? 0;
+        if (totalBytes > MaxExeBytes)
+        {
+            ShowError("Update package is too large.",
+                      $"Server reported {totalBytes:N0} bytes; max allowed {MaxExeBytes:N0}.");
+            return false;
+        }
+
         await using var contentStream = await response.Content.ReadAsStreamAsync(ct);
         await using var fileStream = new FileStream(destPath, FileMode.Create, FileAccess.Write, FileShare.None, 81920);
 
@@ -421,8 +452,16 @@ internal sealed class UpdateDialog : Form
 
         while ((read = await contentStream.ReadAsync(buffer, ct)) > 0)
         {
-            await fileStream.WriteAsync(buffer.AsMemory(0, read), ct);
             downloaded += read;
+            if (downloaded > MaxExeBytes)
+            {
+                await fileStream.DisposeAsync();
+                TryDelete(destPath);
+                ShowError("Update package is too large.",
+                          $"Download exceeded {MaxExeBytes:N0} bytes before completing.");
+                return false;
+            }
+            await fileStream.WriteAsync(buffer.AsMemory(0, read), ct);
 
             if (totalBytes > 0 && !IsDisposed) BeginInvoke(() =>
             {
@@ -565,6 +604,30 @@ internal sealed class UpdateDialog : Form
         !string.IsNullOrEmpty(url) &&
         (url.StartsWith("https://github.com/itsnateai/", StringComparison.OrdinalIgnoreCase) ||
          url.StartsWith("https://objects.githubusercontent.com/", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// Reads the response body as a string but caps the total bytes read.
+    /// Content-Length is checked in the caller; this guards against
+    /// servers that omit Content-Length (chunked transfer) from sending
+    /// an unbounded stream.
+    /// </summary>
+    private static async Task<string> ReadBoundedStringAsync(
+        HttpResponseMessage response, long maxBytes, CancellationToken ct)
+    {
+        await using var stream = await response.Content.ReadAsStreamAsync(ct);
+        var buffer = new byte[8192];
+        using var ms = new MemoryStream();
+        long total = 0;
+        int read;
+        while ((read = await stream.ReadAsync(buffer, ct)) > 0)
+        {
+            total += read;
+            if (total > maxBytes)
+                throw new IOException($"Response exceeded {maxBytes:N0} bytes.");
+            ms.Write(buffer, 0, read);
+        }
+        return System.Text.Encoding.UTF8.GetString(ms.ToArray());
+    }
 
     private static string ComputeFileHash(string filePath)
     {

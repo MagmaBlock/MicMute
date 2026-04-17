@@ -8,10 +8,17 @@ All notable changes to MicMute are documented here.
 
 ### Fixed
 - **Push-to-talk stays muted when you change your hotkey or swap modes mid-hold** — the 2.1.4 fix for stuck-unmuted PTT missed the rebind path. If you ever held your PTT key and then picked a new hotkey from the tray menu, your mic stayed open until the next toggle. Same was true when middle-clicking the tray to swap between Toggle and Push-to-Talk while holding the key. Both paths now properly re-mute.
+- **Exit still unmutes the mic even if you were holding PTT** — an earlier draft of the PTT fix could leave the mic muted in Discord/Zoom after you exited MicMute. Exit now owns the mic state cleanly regardless of what you were doing when you clicked it.
+- **Deafen recovers when your mic is unplugged** — if you were deafened and then your mic dropped (USB headset yanked, sleep/resume), the speakers used to stay muted with no way to recover from the tray. MicMute now restores your speakers and clears the deafen state automatically when the mic disappears.
+- **Hotkey dialog rejects bare letter keys** — "Type manually" will no longer accept a single letter like `a` as a hotkey (which would have hijacked that key in every app). At least one of Ctrl / Alt / Shift / Win is now required, except for F1–F24 which are safe to bind alone.
+- **Fast-user-switching works** — MicMute's single-instance lock is now per-user instead of machine-wide. Family PCs and terminal servers: each logged-in user gets their own tray app instead of the second user's launch silently failing.
 - **Self-update verifies the checksum file origin** — the binary download already required a GitHub release URL; the accompanying `SHA256SUMS` file now gets the same check so both halves of the verify step are equally trusted.
+- **Startup mute state always matches reality** — if Windows rejected the "start muted / start unmuted" request during launch (rare device-init race), the tray icon used to lie for up to 15 seconds. It now re-reads the actual mic state immediately.
 
 ### Changed
 - **Update dialog respects high-DPI scaling** — the Update window now matches the Settings window in DPI handling so buttons stay aligned on 150%/200% displays.
+- **Self-update size-caps every download** — GitHub JSON, the `SHA256SUMS` file, and `MicMute.exe` all have reasonable upper bounds now. A hypothetically compromised or misconfigured release can't fill your disk or exhaust memory.
+- **On-screen display is crash-resistant** — if anything goes wrong while drawing the notification bubble, MicMute logs it and moves on instead of propagating the error.
 
 ## [2.1.5] - 2026-04-16
 
