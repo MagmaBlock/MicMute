@@ -7,6 +7,9 @@ namespace MicMute;
 /// </summary>
 internal static class ShortcutHelper
 {
+    // A3-F06: track WSH-disabled state so we log only once per session.
+    private static bool _wshWarningLogged;
+
     /// <summary>
     /// If a startup shortcut exists but points to a stale exe path, update it.
     /// Called early in app startup so winget/moved installs auto-heal.
@@ -21,7 +24,18 @@ internal static class ShortcutHelper
         try
         {
             var shellType = Type.GetTypeFromProgID("WScript.Shell");
-            if (shellType == null) return;
+            if (shellType == null)
+            {
+                // A3-F06: WSH disabled (group policy or AV stripping COM registration).
+                // Cannot create/validate startup shortcut — log once so support has a breadcrumb.
+                if (!_wshWarningLogged)
+                {
+                    _wshWarningLogged = true;
+                    Log.Warn("ShortcutHelper: WSH disabled (policy?) — cannot create/remove Startup shortcut. " +
+                             "User-visible effect: 'Run at startup' toggle will not take effect.");
+                }
+                return;
+            }
             dynamic shell = Activator.CreateInstance(shellType)!;
             try
             {
@@ -49,7 +63,16 @@ internal static class ShortcutHelper
         {
             var shellType = Type.GetTypeFromProgID("WScript.Shell");
             if (shellType == null)
+            {
+                // A3-F06: WSH disabled — log once per session so callers know the shortcut was not written.
+                if (!_wshWarningLogged)
+                {
+                    _wshWarningLogged = true;
+                    Log.Warn("ShortcutHelper: WSH disabled (policy?) — cannot create/remove Startup shortcut. " +
+                             "User-visible effect: 'Run at startup' toggle will not take effect.");
+                }
                 return;
+            }
 
             object shell = Activator.CreateInstance(shellType)!;
             try

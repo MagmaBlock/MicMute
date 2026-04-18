@@ -89,7 +89,7 @@ Releases publish a `SHA256SUMS` file alongside the exe. The in-app **Update** bu
 
 Right-click the tray icon for the full menu:
 - Toggle mute
-- Current hotkey combo (click to change — supports AHK syntax: `#` Win, `^` Ctrl, `!` Alt, `+` Shift)
+- Current hotkey combo (click to change — combo shorthand: `#` Win, `^` Ctrl, `!` Alt, `+` Shift)
 - Switch between Toggle and Push-to-Talk modes
 - Select mic source
 - Open Settings, Help, Sound Settings
@@ -102,10 +102,10 @@ Settings are stored in `MicMute.ini` (auto-created next to the exe):
 ```ini
 [General]
 Hotkey=#^+a
-SoundFeedback=1
+SoundFeedback=0
 Mode=toggle
 OSD_Enabled=0
-OSD_Duration=1500
+OSD_Duration=800
 MuteLock=0
 MiddleClickToggle=1
 StartMuted=no
@@ -114,11 +114,11 @@ DeafenHotkey=
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `Hotkey` | `#^+a` | Main mute hotkey (AHK syntax) |
-| `SoundFeedback` | `1` | Play tone on mute/unmute |
+| `Hotkey` | `#^+a` | Main mute hotkey (`#`=Win, `^`=Ctrl, `!`=Alt, `+`=Shift) |
+| `SoundFeedback` | `0` | Play tone on mute/unmute |
 | `Mode` | `toggle` | `toggle` or `push-to-talk` |
 | `OSD_Enabled` | `0` | Show on-screen mute indicator |
-| `OSD_Duration` | `1500` | OSD display time in ms |
+| `OSD_Duration` | `800` | OSD display time in ms |
 | `MuteLock` | `0` | Revert external mute changes on the 15s sync tick |
 | `MiddleClickToggle` | `1` | Middle-click tray to switch modes |
 | `StartMuted` | `no` | `no`, `yes`, `unmuted`, or `last` |

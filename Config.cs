@@ -14,7 +14,7 @@ internal sealed class Config
 
     // Settings with defaults
     public string Hotkey = "#^+a";
-    public bool SoundFeedback = true;
+    public bool SoundFeedback = false;
     public string Mode = "toggle"; // "toggle" or "push-to-talk"
     public string DeviceId = "";
     public string IconMuted = "";
@@ -23,8 +23,12 @@ internal sealed class Config
     public string UnmuteSound = "";
     public bool MuteLock;
     public bool OsdEnabled;
-    public int OsdDuration = 1500;
+    public int OsdDuration = 800;
     public string DeafenHotkey = "";
+    // User-acknowledged hotkey conflicts — if the captured hotkey matches these
+    // exactly, skip the "claimed by another app" warning on Apply/Save.
+    public string AckedMainHkConflict = "";
+    public string AckedDeafenHkConflict = "";
     public bool MiddleClickToggle = true;
     public string StartMuted = "no"; // "no", "yes", "unmuted", "last"
     public bool LastMuteState;
@@ -47,6 +51,12 @@ internal sealed class Config
     // rather than one WriteIni per key.
     private bool _migrationPending;
 
+    // Serializes concurrent Save() calls (e.g. MuteLock fight-back racing
+    // Settings Apply). The unique-per-call tmp suffix below means parallel
+    // calls won't clobber each other's temp file even without the lock, but
+    // the lock ensures the final File.Move is also serialized.
+    private static readonly object _saveLock = new();
+
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
     private static extern uint GetPrivateProfileString(
         string lpAppName, string lpKeyName, string lpDefault,
@@ -55,6 +65,21 @@ internal sealed class Config
     public Config()
     {
         _iniPath = ResolveIniPath();
+    }
+
+    private static bool IsDirectoryWritable(string dir)
+    {
+        string probe = Path.Combine(dir, $".micmute_write_test_{Guid.NewGuid():N}");
+        try
+        {
+            File.WriteAllBytes(probe, Array.Empty<byte>());
+            File.Delete(probe);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static string ResolveIniPath()
@@ -81,12 +106,30 @@ internal sealed class Config
         // 3. Winget install — create in %APPDATA%\MicMute\
         if (UpdateDialog.IsWingetManaged())
         {
-            Directory.CreateDirectory(appDataDir);
+            try { Directory.CreateDirectory(appDataDir); }
+            catch (Exception ex)
+            {
+                Log.Warn($"ResolveIniPath: could not create AppData dir '{appDataDir}': {ex.Message}; falling back to portable path");
+                return portablePath;
+            }
             return appDataPath;
         }
 
-        // 4. Traditional portable — create next to exe
-        return portablePath;
+        // 4. Traditional portable — create next to exe, but only if the
+        //    directory is writable. If not (e.g. Program Files without
+        //    elevation), fall back to %APPDATA%\MicMute\ silently.
+        if (!string.IsNullOrEmpty(exeDir) && IsDirectoryWritable(exeDir))
+            return portablePath;
+
+        // Fall back: exeDir not writable (Program Files / read-only share)
+        try { Directory.CreateDirectory(appDataDir); }
+        catch (Exception ex)
+        {
+            Log.Warn($"ResolveIniPath: could not create AppData dir '{appDataDir}': {ex.Message}; using portable path as last resort");
+            return portablePath;
+        }
+        Log.Info($"ResolveIniPath: exe dir not writable, redirecting config to '{appDataPath}'");
+        return appDataPath;
     }
 
     public void Load()
@@ -94,13 +137,19 @@ internal sealed class Config
         if (!File.Exists(_iniPath))
             return;
 
+        SweepOrphanTmps();
         FixEncoding();
 
         Hotkey = MigrateLegacyHotkey(ReadIni("Hotkey", Hotkey));
-        SoundFeedback = ReadIni("SoundFeedback", "1") == "1";
-        Mode = ReadIni("Mode", Mode).Trim();
-        if (Mode != "toggle" && Mode != "push-to-talk")
+        SoundFeedback = ReadIni("SoundFeedback", "0") == "1";
+        string rawMode = ReadIni("Mode", Mode).Trim();
+        if (rawMode == "toggle" || rawMode == "push-to-talk")
+            Mode = rawMode;
+        else
+        {
+            Log.Warn($"Config: Mode value '{rawMode}' invalid, using 'toggle'");
             Mode = "toggle";
+        }
         DeviceId = ReadIni("DeviceId", "").Trim();
         IconMuted = SanitizePath(ReadIni("IconMuted", "").Trim());
         IconActive = SanitizePath(ReadIni("IconActive", "").Trim());
@@ -108,13 +157,23 @@ internal sealed class Config
         UnmuteSound = SanitizePath(ReadIni("UnmuteSound", "").Trim());
         MuteLock = ReadIni("MuteLock", "0") == "1";
         OsdEnabled = ReadIni("OSD_Enabled", "0") == "1";
-        if (int.TryParse(ReadIni("OSD_Duration", "1500"), out int dur))
-            OsdDuration = Math.Max(500, dur);
+        string rawOsdDur = ReadIni("OSD_Duration", "800");
+        if (int.TryParse(rawOsdDur, out int dur))
+            OsdDuration = Math.Clamp(dur, 500, 10000);
+        else
+            Log.Warn($"Config: OSD_Duration value '{rawOsdDur}' invalid, using default 800");
         DeafenHotkey = MigrateLegacyHotkey(ReadIni("DeafenHotkey", "").Trim());
+        AckedMainHkConflict = ReadIni("AckedMainHkConflict", "").Trim();
+        AckedDeafenHkConflict = ReadIni("AckedDeafenHkConflict", "").Trim();
         MiddleClickToggle = ReadIni("MiddleClickToggle", "1") == "1";
-        StartMuted = ReadIni("StartMuted", "no").Trim().ToLowerInvariant();
-        if (StartMuted != "no" && StartMuted != "yes" && StartMuted != "unmuted" && StartMuted != "last")
+        string rawStartMuted = ReadIni("StartMuted", "no").Trim().ToLowerInvariant();
+        if (rawStartMuted == "no" || rawStartMuted == "yes" || rawStartMuted == "unmuted" || rawStartMuted == "last")
+            StartMuted = rawStartMuted;
+        else
+        {
+            Log.Warn($"Config: StartMuted value '{rawStartMuted}' invalid, using 'no'");
             StartMuted = "no";
+        }
         LastMuteState = ReadIni("LastMuteState", "0") == "1";
 
         // Persist any v2.1.5 → v2.1.6 bare-hotkey migrations so the next
@@ -122,8 +181,10 @@ internal sealed class Config
         // hotkey" flow doesn't revert to the original legacy string).
         if (_migrationPending)
         {
-            _migrationPending = false;
-            Save();
+            if (Save())
+                _migrationPending = false;
+            else
+                Log.Warn("Migration save failed; will retry on next launch");
         }
     }
 
@@ -175,11 +236,16 @@ internal sealed class Config
         sb.AppendLine("OSD_Enabled=" + (OsdEnabled ? "1" : "0"));
         sb.AppendLine("OSD_Duration=" + OsdDuration.ToString());
         sb.AppendLine("DeafenHotkey=" + DeafenHotkey);
+        sb.AppendLine("AckedMainHkConflict=" + AckedMainHkConflict);
+        sb.AppendLine("AckedDeafenHkConflict=" + AckedDeafenHkConflict);
         sb.AppendLine("MiddleClickToggle=" + (MiddleClickToggle ? "1" : "0"));
         sb.AppendLine("StartMuted=" + StartMuted);
         sb.AppendLine("LastMuteState=" + (LastMuteState ? "1" : "0"));
 
-        return WriteAtomic(sb.ToString());
+        lock (_saveLock)
+        {
+            return WriteAtomic(sb.ToString());
+        }
     }
 
     public bool SaveLastMuteState(bool muted)
@@ -190,18 +256,68 @@ internal sealed class Config
         return Save();
     }
 
+    /// <summary>
+    /// Removes orphaned .tmp files left by interrupted saves (e.g. AV lock,
+    /// process crash). Only removes files older than 10 seconds so an in-
+    /// flight write from a concurrent instance is not deleted mid-write.
+    /// </summary>
+    private void SweepOrphanTmps()
+    {
+        try
+        {
+            string dir = Path.GetDirectoryName(_iniPath) ?? "";
+            string baseName = Path.GetFileName(_iniPath);
+            if (string.IsNullOrEmpty(dir))
+                return;
+            foreach (string f in Directory.GetFiles(dir, baseName + ".tmp*"))
+            {
+                try
+                {
+                    var fi = new FileInfo(f);
+                    if ((DateTime.UtcNow - fi.LastWriteTimeUtc).TotalSeconds > 10)
+                        fi.Delete();
+                }
+                catch { /* best-effort per-file */ }
+            }
+        }
+        catch { /* best-effort sweep */ }
+    }
+
     private bool WriteAtomic(string content)
     {
-        string tmp = _iniPath + ".tmp";
+        // Unique suffix per call so parallel invocations (before _saveLock
+        // was added or if called directly) never clobber each other's tmp.
+        string tmp = $"{_iniPath}.tmp.{Guid.NewGuid():N}";
         try
         {
             string dir = Path.GetDirectoryName(_iniPath);
             if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
                 Directory.CreateDirectory(dir);
 
-            File.WriteAllText(tmp, content, new UTF8Encoding(false));
-            File.Move(tmp, _iniPath, overwrite: true);
-            return true;
+            // Write + flush to disk before the rename so a crash after
+            // File.Move leaves a complete file, not a partial one.
+            byte[] bytes = new UTF8Encoding(false).GetBytes(content);
+            using (var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                fs.Write(bytes, 0, bytes.Length);
+                fs.Flush(flushToDisk: true);
+            }
+
+            // Retry the Move up to 3 times on transient AV/indexer locks.
+            const int maxAttempts = 3;
+            for (int attempt = 1; attempt <= maxAttempts; attempt++)
+            {
+                try
+                {
+                    File.Move(tmp, _iniPath, overwrite: true);
+                    return true;
+                }
+                catch (IOException) when (attempt < maxAttempts)
+                {
+                    System.Threading.Thread.Sleep(50);
+                }
+            }
+            return true; // last attempt succeeded (no exception escaped loop)
         }
         catch (Exception ex)
         {
@@ -515,33 +631,107 @@ internal sealed class Config
 
     private string ReadIni(string key, string defaultValue)
     {
-        var sb = new StringBuilder(512);
-        GetPrivateProfileString("General", key, defaultValue, sb, 512, _iniPath);
-        return sb.ToString().Trim();
+        // Start at 4096 and double on truncation (return == bufferSize - 1).
+        // Cap at 32768 to prevent runaway on a pathological INI.
+        uint bufferSize = 4096;
+        const uint maxBufferSize = 32768;
+        while (true)
+        {
+            var sb = new StringBuilder((int)bufferSize);
+            uint written = GetPrivateProfileString("General", key, defaultValue, sb, bufferSize, _iniPath);
+            if (written < bufferSize - 1 || bufferSize >= maxBufferSize)
+                return sb.ToString().Trim();
+            bufferSize = Math.Min(bufferSize * 2, maxBufferSize);
+        }
     }
 
     /// <summary>
     /// Fix UTF-16 LE without BOM encoding issue (mirrors AHK FixIniEncoding).
     /// Rewrites atomically via .tmp swap so a crash mid-rewrite can't corrupt
     /// the INI beyond recovery.
+    /// Also detects truncated or structurally empty INI files and backs them
+    /// up as .corrupted so the app can start cleanly with defaults.
     /// </summary>
     private void FixEncoding()
     {
         try
         {
             byte[] bytes = File.ReadAllBytes(_iniPath);
-            if (bytes.Length < 4)
+
+            // Detect truncated / empty INI — too short to contain [General]
+            // (minimum meaningful INI is ~20 bytes). Back it up and let Load()
+            // proceed with field defaults rather than silently resetting them.
+            if (bytes.Length < 20)
+            {
+                Log.Warn($"Config file appears truncated ({bytes.Length} bytes); backing up and using defaults.");
+                TryBackupCorrupted();
                 return;
-            // Check for UTF-16 LE BOM or plain ANSI
-            if ((bytes[0] == 0xFF && bytes[1] == 0xFE) || bytes[1] != 0x00)
-                return;
-            // UTF-16 LE without BOM — re-encode to UTF-8
+            }
+
+            // Validate [General] section header as a structural sanity check.
+            // GetPrivateProfileString silently returns defaults when the section
+            // is missing, which looks identical to a fresh install. Surface it.
+            string textProbe = Encoding.UTF8.GetString(bytes);
+            if (!textProbe.Contains("[General]", StringComparison.OrdinalIgnoreCase))
+            {
+                // Could be UTF-16; check before giving up.
+                textProbe = Encoding.Unicode.GetString(bytes);
+                if (!textProbe.Contains("[General]", StringComparison.OrdinalIgnoreCase))
+                {
+                    Log.Warn("Config file missing [General] section; backing up and using defaults.");
+                    TryBackupCorrupted();
+                    return;
+                }
+            }
+
+            // Short-circuit: UTF-16 LE BOM present — the INI API won't read
+            // it, but the content is intact. Fall through to re-encode below.
+            bool hasBom = bytes[0] == 0xFF && bytes[1] == 0xFE;
+
+            if (!hasBom)
+            {
+                // Stricter UTF-16LE-without-BOM heuristic: in UTF-16LE ASCII
+                // text, even-indexed bytes are the character value (non-zero
+                // for printable ASCII) and odd-indexed bytes are the high byte
+                // (0x00 for Basic Latin). Require at least 4 of the first 8
+                // even bytes non-zero AND at least 4 of the first 8 odd bytes
+                // zero. This avoids misfiring on any UTF-8 file that merely
+                // happens to have bytes[1] == 0x00 at some position.
+                int sampleLen = Math.Min(bytes.Length, 16); // covers 8 pairs
+                int evenNonZero = 0, oddZero = 0;
+                for (int i = 0; i + 1 < sampleLen; i += 2)
+                {
+                    if (bytes[i] != 0x00) evenNonZero++;
+                    if (bytes[i + 1] == 0x00) oddZero++;
+                }
+                bool looksUtf16Le = evenNonZero >= 4 && oddZero >= 4;
+                if (!looksUtf16Le)
+                    return; // already UTF-8 / ANSI — nothing to do
+            }
+
+            // UTF-16 LE (with or without BOM) — re-encode to UTF-8 (no BOM)
+            // so the Windows INI API (ANSI) can read it.
             string content = Encoding.Unicode.GetString(bytes);
-            WriteAtomic(content);
+            if (WriteAtomic(content))
+                Log.Info("FixEncoding: re-encoded UTF-16LE INI to UTF-8");
         }
-        catch
+        catch (Exception ex)
         {
-            // Ignore encoding fix failures
+            Log.Warn("FixEncoding failed: " + ex.Message);
+        }
+    }
+
+    private void TryBackupCorrupted()
+    {
+        try
+        {
+            string backupPath = _iniPath + ".corrupted";
+            File.Copy(_iniPath, backupPath, overwrite: true);
+            Log.Info($"FixEncoding: corrupted INI backed up to '{backupPath}'");
+        }
+        catch (Exception ex)
+        {
+            Log.Warn("FixEncoding: could not back up corrupted INI: " + ex.Message);
         }
     }
 }

@@ -43,8 +43,11 @@ internal sealed class OsdForm : Form
         _dismissTimer = new System.Windows.Forms.Timer();
         _dismissTimer.Tick += (_, _) =>
         {
+            // A5-F13: check _disposed before touching the timer — a late Tick that
+            // fires after Dispose() would otherwise hit an ObjectDisposedException.
+            if (_disposed) return;
             _dismissTimer.Stop();
-            if (!_disposed) Hide();
+            Hide();
         };
     }
 
@@ -106,12 +109,15 @@ internal sealed class OsdForm : Form
             if (_disposed || IsDisposed) return;
             if (string.IsNullOrWhiteSpace(displayText)) return;
 
-            // Measure text — tighter padding (10 + 12 + text + 12) and a
-            // shorter pill height than the original high-contrast variant.
-            using (var g = CreateGraphics())
+            // A5-F10: use TextRenderer.MeasureText instead of CreateGraphics()+MeasureString.
+            // CreateGraphics() allocates a short-lived GDI DC that can be missed by the
+            // using-block if the form handle isn't created yet (ISR window).  TextRenderer
+            // is handle-independent and consistent across DPI contexts.  The paint path
+            // retains DrawString (GDI+); the 1-2 px kerning difference is negligible for
+            // a short pill label — accepted per design review.
             {
-                var labelSize = g.MeasureString(displayText, s_labelFont);
-                int w = 10 + 12 + (int)Math.Ceiling(labelSize.Width) + 12;
+                var labelSize = TextRenderer.MeasureText(displayText, s_labelFont);
+                int w = 10 + 12 + labelSize.Width + 12;
                 int h = 28;
 
                 // Default anchor: bottom-right corner of the working area.

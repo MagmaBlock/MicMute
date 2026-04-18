@@ -4,6 +4,44 @@
 
 All notable changes to MicMute are documented here.
 
+## [2.1.10] - 2026-04-18
+
+### Added
+- **SHA256 integrity check on self-update** — updates from v2.1.10 onward verify the downloaded exe against a signed `SHA256SUMS` file before replacing your install. If the file is missing or the hash doesn't match, the update aborts and tells you to download manually. Old releases without the hash file are grandfathered so you can still update to this version.
+- **Crisp UI on high-DPI and mixed-DPI setups** — Settings, Update, and Help dialogs now render natively at each monitor's DPI instead of being bitmap-stretched. Text is sharper; layouts don't go blurry when you drag a dialog across monitors. If you're on a 4K laptop + 1080p desktop, this is the big visible change.
+- **Dialog text bumped from 9 pt to 9.5 pt** — paired with the DPI change so text stays readable when the bitmap stretch goes away.
+- **Survives laptop sleep / resume** — MicMute now re-initialises the audio endpoint, re-registers both the Toggle and Deafen hotkeys, and refreshes the tray icon when Windows comes back from S3/S4. Before this, you had up to 15 seconds of stale state (hotkeys bound to a mic that no longer exists) until the next sync tick recovered.
+- **"Use it anyway" hotkey-conflict remembered** — if you confirm a hotkey conflict once, MicMute stops re-asking on every Apply/Save for that same combo. Change the combo and it re-probes fresh.
+
+### Changed
+- **OSD duration default: 1500 ms → 800 ms** — snappier mute/unmute toast that gets out of the way faster.
+- **Sound feedback default: on → off** — fresh installs are quiet by default. Turn it back on in Settings if you liked the beeps.
+- **Tray right-click menu reshuffled** — the "MicMute v…" header line is now a greyed, non-interactive label (like Caps Lock's tray). The hotkey combo below it is the clickable toggle. One fewer accidental click on the header.
+- **Settings label renamed** — "On startup:" → "Mic mode On Startup:" to make it clearer what the dropdown controls.
+- **Help window text + README** — dropped the "AHK syntax" phrasing; the `#^!+` shorthand is now described as "combo shorthand".
+- **Faster cold start** — removed a 250 ms legacy-mutex back-compat wait that existed for v2.1.5 → v2.1.6 upgrade handoff. v2.1.5 is four versions old; the wait was cost with no remaining benefit.
+
+### Fixed
+- **Self-update no longer bricks your install if the new exe fails to launch** — the old `.old` copy is now kept across the restart so you can fall back. Previously, if Windows Defender or AV quarantined the freshly swapped binary right after the rename, you'd have no MicMute at all until you re-downloaded.
+- **Self-update swap is atomic** — uses `File.Replace` instead of two separate renames. Closes a tiny window where a power loss or `taskkill` between the two renames could leave disk without `MicMute.exe` entirely.
+- **Exit cleanup no longer double-fires** — clicking Exit twice quickly (or during a sync tick) used to log a stale-COM error and could leave a zombie tray icon.
+- **Sticky Push-to-Talk no longer lies when an external app mutes your mic** — if Discord, Zoom, OBS, or the sound control panel mutes your mic while sticky-PTT is active, the "PTT — mic listening" bubble now goes away. Previously it stayed on screen while your mic was actually muted, and you'd need two tray clicks to recover.
+- **Custom icons that fail to load now tell you** — if your configured icon path is broken (AV quarantine, file moved) and MicMute falls back to the built-in icon, you get a tooltip once per session instead of silently wrong icons.
+- **Hotkey registration failures are logged** — if another app already owns your combo, the Win32 error code lands in `micmute.log` so you can diagnose "my hotkey stopped working" reports.
+- **Custom icon + log path fallback** — if `%LOCALAPPDATA%\MicMute\` is locked down by policy, logs now fall back through `%TEMP%\MicMute\` to the exe directory; if the primary log breaks mid-session, writes go to `%TEMP%\micmute-emergency.log` so diagnostic breadcrumbs survive.
+- **Config robustness** — INI file is written with a per-call unique temp name + filesystem flush-to-disk + retry on transient AV locks. UTF-16LE detection tightened so a UTF-8 file whose second byte happens to be `0x00` is no longer misread and corrupted. Invalid INI values (malformed Mode, non-numeric OSD duration) now log the bad value instead of silently reverting to defaults.
+- **Settings → Tab key works in hotkey capture** — pressing Tab inside a capturing hotkey field now commits and advances focus like a normal field, instead of being swallowed with nothing visible happening.
+- **Duplicate-hotkey check compares combos, not raw strings** — a hand-edited INI with the same combo in different modifier order (e.g. `^+a` vs `+^a`) is now caught as a duplicate instead of silently registering both and losing one.
+- **Settings dialog no longer hosts 4 invisible zero-width TextBoxes** — replaced with a cleaner in-memory pattern. No behaviour change; fewer phantom controls in the focus tree.
+
+### Under the hood (no user-visible change)
+- Audit swarm cleared 154 potential issues across COM, resources, lifecycle, error handling, UI patterns, config, self-update, and hotkey paths.
+- Release build clean with TreatWarningsAsErrors; semgrep 0/217 findings held.
+
+### Notes
+- Existing config + hotkey bindings survive the upgrade untouched.
+- If you had `SoundFeedback=1` or `OSD_Duration=1500` saved in your INI from a prior version, those stay on the values you chose — the new defaults only apply to fresh installs.
+
 ## [2.1.9] - 2026-04-17
 
 ### Added

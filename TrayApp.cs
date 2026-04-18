@@ -54,8 +54,22 @@ internal sealed class TrayApp : Form
     // broken MuteSound doesn't spam the log on every toggle.
     private readonly HashSet<string> _playSoundFailed = new(StringComparer.OrdinalIgnoreCase);
 
+    // One-shot: notify the user the first time a custom icon fails to load.
+    // Mirrors _playSoundFailed pattern.
+    private bool _customIconFailNotified;
+    private bool _pendingCustomIconToast;
+
+    // Consecutive OnSyncTick failure tracking for A3-F16 / A3-F17.
+    private int _syncConsecutiveFails;
+    private bool _syncFailTooltipShown;
+    private int _muteLockFightBackFails;
+    private bool _muteLockFightBackTooltipShown;
+
     private bool _disposed;
     private bool _shuttingDown;
+
+    // Static weak reference for AppDomain.ProcessExit best-effort cleanup (A2-F08).
+    private static WeakReference<TrayApp> _liveInstance;
 
     public TrayApp()
     {
@@ -109,15 +123,34 @@ internal sealed class TrayApp : Form
         // Explorer restart recovery
         _wmTaskbarCreated = NativeMethods.RegisterWindowMessage("TaskbarCreated");
 
-        // Register hotkeys
-        RegisterMainHotkey();
-        RegisterDeafenHotkey();
+        // A2-F08: register for process-exit best-effort cleanup (ghost icon prevention).
+        _liveInstance = new WeakReference<TrayApp>(this);
+        AppDomain.CurrentDomain.ProcessExit += OnProcessExit;
 
         // Periodic sync timer — 15s to detect mic plug/unplug and external mute changes.
-        // Hotkey actions sync immediately, so this doesn't affect responsiveness.
-        _syncTimer = new System.Windows.Forms.Timer { Interval = 15000 };
-        _syncTimer.Tick += OnSyncTick;
-        _syncTimer.Start();
+        // A2-F13: start the safety-net timer BEFORE hotkey registration so it is ticking
+        // even if hotkey reg throws. Hotkey actions sync immediately, so this doesn't
+        // affect responsiveness.
+        try
+        {
+            _syncTimer = new System.Windows.Forms.Timer { Interval = 15000 };
+            _syncTimer.Tick += OnSyncTick;
+            _syncTimer.Start();
+
+            // Hotkey registration is deferred to OnHandleCreated (A2-F10) where the
+            // HWND is guaranteed to be valid.  The fields are initialised here so
+            // the hotkey section below is a no-op — the real call happens in
+            // OnHandleCreated.
+            // RegisterMainHotkey / RegisterDeafenHotkey are called from OnHandleCreated.
+
+            // Subscribe to suspend/resume events (BUG-002).
+            Microsoft.Win32.SystemEvents.PowerModeChanged += OnPowerModeChanged;
+        }
+        catch
+        {
+            DisposeSafe();
+            throw;
+        }
 
         // Show notification if no mic found
         if (!hasAudio)
@@ -126,21 +159,146 @@ internal sealed class TrayApp : Form
         }
     }
 
+    // A2-F10: defer native RegisterHotKey calls until the HWND is alive.
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        RegisterMainHotkey();
+        RegisterDeafenHotkey();
+
+        // A3-F13: deliver any custom-icon-fallback toast that was queued before the
+        // handle existed (LoadIcons runs in the ctor, before OnHandleCreated).
+        if (_pendingCustomIconToast)
+        {
+            _pendingCustomIconToast = false;
+            BeginInvoke((Action)(() =>
+                ShowTimedTooltip(
+                    "Custom icon couldn't load — using built-in icon.\nCheck the path in Settings.", 5000)));
+        }
+    }
+
+    // BUG-002 / A2-F02: re-initialise audio on resume from sleep/hibernate.
+    private void OnPowerModeChanged(object sender, Microsoft.Win32.PowerModeChangedEventArgs e)
+    {
+        if (e.Mode != Microsoft.Win32.PowerModes.Resume)
+            return;
+
+        // Marshal to the UI thread — PowerModeChanged fires on a thread-pool thread.
+        if (IsHandleCreated)
+        {
+            BeginInvoke((Action)ResumeRecovery);
+        }
+    }
+
+    private void ResumeRecovery()
+    {
+        // Re-run the same recovery path that OnSyncTick uses when the endpoint
+        // is gone — Release + Initialize + RegisterMainHotkey + tooltip refresh.
+        // The 15 s _syncTimer is left running as a belt-and-suspenders fallback.
+        _audio.Release();
+
+        if (_audio.Initialize(_config.DeviceId))
+        {
+            bool? m = _audio.GetMute();
+            _muted = m ?? false;
+            SyncTrayIcon();
+            RegisterMainHotkey();
+            RegisterDeafenHotkey();
+            Log.Warn("ResumeRecovery: audio endpoint re-initialised after resume");
+        }
+        else
+        {
+            _muted = false;
+            SyncTrayIcon();
+            ShowTimedTooltip("Microphone not found after resume.\nWill auto-reconnect.", 5000);
+        }
+    }
+
+    // A2-F08: AppDomain.ProcessExit best-effort cleanup — hides the ghost tray icon
+    // and unregisters hotkeys on unhandled crashes that skip the normal Dispose path.
+    private static void OnProcessExit(object sender, EventArgs e)
+    {
+        if (_liveInstance != null && _liveInstance.TryGetTarget(out var app) && !app._disposed)
+        {
+            try
+            {
+                app._trayIcon.Visible = false;
+                app._trayIcon.Dispose();
+            }
+            catch { /* best-effort */ }
+
+            try
+            {
+                if (app._mainHotkeyRegistered)
+                    NativeMethods.UnregisterHotKey(app.Handle, HOTKEY_ID_MAIN);
+                if (app._deafenHotkeyRegistered)
+                    NativeMethods.UnregisterHotKey(app.Handle, HOTKEY_ID_DEAFEN);
+            }
+            catch { /* best-effort */ }
+        }
+    }
+
+    // A1-F09: null-safe dispose used when ctor throws partway through init.
+    private void DisposeSafe()
+    {
+        try { _syncTimer?.Stop(); _syncTimer?.Dispose(); } catch { }
+        try { _flashTimer?.Stop(); _flashTimer?.Dispose(); } catch { }
+        try { _pttUniversalTimer?.Stop(); _pttUniversalTimer?.Dispose(); } catch { }
+        try { _osdForm?.Dispose(); } catch { }
+        try { if (_trayIcon != null) { _trayIcon.Visible = false; _trayIcon.Dispose(); } } catch { }
+        try { DisposeMenuItems(); _trayMenu?.Dispose(); } catch { }
+        try { _menuTitleFont?.Dispose(); } catch { }
+        try { DisposeIcons(); } catch { }
+        try { _audio?.Dispose(); } catch { }
+        try { _settingsDialog?.Dispose(); } catch { }
+    }
+
     // ── Icon Loading ──────────────────────────────────────────────────────
 
     private void LoadIcons()
     {
-        _iconActive = LoadIcon(_config.IconActive, "mic_on.ico");
-        _iconMuted = LoadIcon(_config.IconMuted, "mic_off.ico");
+        bool activeUsedFallback = false;
+        bool mutedUsedFallback = false;
+        _iconActive = LoadIcon(_config.IconActive, "mic_on.ico", out activeUsedFallback);
+        _iconMuted  = LoadIcon(_config.IconMuted,  "mic_off.ico", out mutedUsedFallback);
+
+        // A3-F13: notify the user once per session if a custom icon fell back to
+        // the embedded resource, mirroring the _playSoundFailed pattern.
+        if (!_customIconFailNotified && (activeUsedFallback || mutedUsedFallback))
+        {
+            _customIconFailNotified = true;
+            // _osdForm may not exist yet on the very first ctor call (icons are
+            // loaded before the OSD is constructed).  ShowTimedTooltip guards
+            // against that via _osdForm null-check below, but we post this via
+            // BeginInvoke so the ctor finishes first and _osdForm is ready.
+            if (_osdForm != null)
+            {
+                ShowTimedTooltip(
+                    "Custom icon couldn't load — using built-in icon.\nCheck the path in Settings.", 5000);
+            }
+            else if (IsHandleCreated)
+            {
+                // Queue until the message pump is running.
+                BeginInvoke((Action)(() =>
+                    ShowTimedTooltip(
+                        "Custom icon couldn't load — using built-in icon.\nCheck the path in Settings.", 5000)));
+            }
+            else
+            {
+                // First-ctor path: Handle not yet created; BeginInvoke would throw.
+                // Defer the toast until OnHandleCreated fires.
+                _pendingCustomIconToast = true;
+            }
+        }
     }
 
-    private static Icon LoadIcon(string customPath, string embeddedName)
+    private static Icon LoadIcon(string customPath, string embeddedName, out bool usedFallback)
     {
         // All icons come back pre-rasterized to the current tray small-icon
         // size, so Shell_NotifyIcon doesn't have to rescale on every update.
         // Without this, a 256x256 .ico forces the shell to resample down to
         // 16/24/32 px on every NIM_MODIFY — noticeable as per-click lag.
-        using Icon raw = LoadIconRaw(customPath, embeddedName);
+        using Icon raw = LoadIconRaw(customPath, embeddedName, out usedFallback);
         try
         {
             return RasterizeToTraySize(raw);
@@ -152,13 +310,27 @@ internal sealed class TrayApp : Form
         }
     }
 
-    private static Icon LoadIconRaw(string customPath, string embeddedName)
+    // Backward-compat overload so callers that don't need the fallback flag still compile.
+    private static Icon LoadIcon(string customPath, string embeddedName)
+        => LoadIcon(customPath, embeddedName, out _);
+
+    private static Icon LoadIconRaw(string customPath, string embeddedName, out bool usedFallback)
     {
+        usedFallback = false;
         // Priority: custom path > file on disk next to exe > embedded resource
         if (!string.IsNullOrEmpty(customPath) && File.Exists(customPath))
         {
             try { return new Icon(customPath); }
-            catch (Exception ex) { Log.Warn($"LoadIcon custom '{customPath}' failed: {ex.Message}"); }
+            catch (Exception ex)
+            {
+                Log.Warn($"LoadIcon custom '{customPath}' failed: {ex.Message}");
+                usedFallback = true;
+            }
+        }
+        else if (!string.IsNullOrEmpty(customPath))
+        {
+            // Path was configured but file doesn't exist — that's a fallback too.
+            usedFallback = true;
         }
 
         string dir = Path.GetDirectoryName(Environment.ProcessPath ?? "")
@@ -419,6 +591,8 @@ internal sealed class TrayApp : Form
                     // silently leaving the user with no hotkey until they
                     // mode-switch or relaunch.
                     RegisterMainHotkey();
+                    _syncConsecutiveFails = 0;
+                    _syncFailTooltipShown = false;
                 }
                 return;
             }
@@ -469,11 +643,23 @@ internal sealed class TrayApp : Form
                     if (_lockDebounce)
                     {
                         _lockDebounce = false;
+                        _muteLockFightBackFails = 0;
+                        _muteLockFightBackTooltipShown = false;
                         return;
                     }
                     if (_audio.SetMute(_muted))
                     {
                         _lockDebounce = true;
+                        _muteLockFightBackFails = 0;
+                        _muteLockFightBackTooltipShown = false;
+
+                        // BUG-007 / A8-F01: if sticky PTT is active and we couldn't hold
+                        // our un-muted state (external muted won and we gave up), the
+                        // sticky context is now invalid — clear it.
+                        // Here we successfully fought back to _muted. If _muted is true
+                        // and sticky was set, sticky-unmuted is a lie.
+                        if (_pttStickyUnmuted && _muted)
+                            ClearStickyPttOverride();
                     }
                     else
                     {
@@ -481,6 +667,26 @@ internal sealed class TrayApp : Form
                         // tick to retry the fight-back instead of silently
                         // conceding the external state for a full 15s cycle.
                         Log.Warn("MuteLock fight-back SetMute failed; will retry on next sync tick");
+
+                        // A3-F17: after N=3 consecutive fight-back failures, surface a
+                        // high-visibility tooltip and flash the icon. The user's mic may
+                        // be live while MuteLock thinks it's muted.
+                        _muteLockFightBackFails++;
+                        if (_muteLockFightBackFails >= 3 && !_muteLockFightBackTooltipShown)
+                        {
+                            _muteLockFightBackTooltipShown = true;
+                            ShowTimedTooltip(
+                                "\u26a0 MicMute couldn't keep your mic muted \u2014 mic may be live.\nTray \u2192 Reinit Mic.",
+                                8000);
+                            FlashIcon();
+                        }
+
+                        // BUG-007 / A8-F01: fight-back failed — external muted our mic
+                        // and we couldn't re-assert. If sticky PTT says we're unmuted,
+                        // that's now a lie — clear the sticky context so the OSD stops
+                        // claiming the mic is listening.
+                        if (_pttStickyUnmuted && externalMuted)
+                            ClearStickyPttOverride();
                     }
                 }
                 else
@@ -488,18 +694,41 @@ internal sealed class TrayApp : Form
                     // Accept external change
                     _muted = externalMuted;
                     SyncTrayIcon();
+
+                    // BUG-007 / A8-F01: MuteLock is OFF. External app changed the mic
+                    // state. If sticky PTT says we're unmuted but the mic is now muted,
+                    // the OSD is lying — clear the sticky flag so the user sees truth.
+                    if (_pttStickyUnmuted && externalMuted)
+                        ClearStickyPttOverride();
                 }
             }
             else
             {
                 _lockDebounce = false;
+                _muteLockFightBackFails = 0;
+                _muteLockFightBackTooltipShown = false;
             }
+
+            // A3-F16: reset consecutive failure counter on any successful tick.
+            _syncConsecutiveFails = 0;
+            _syncFailTooltipShown = false;
         }
         catch (Exception ex)
         {
             // Swallow to keep the tray alive — the global handler is our safety net,
             // but a transient audio-service hiccup shouldn't kill the app.
             Log.Error("OnSyncTick", ex);
+
+            // A3-F16: after 4 consecutive tick exceptions, show a one-shot tooltip
+            // so the user knows their mute state may be stale.
+            _syncConsecutiveFails++;
+            if (_syncConsecutiveFails >= 4 && !_syncFailTooltipShown)
+            {
+                _syncFailTooltipShown = true;
+                ShowTimedTooltip(
+                    "MicMute is having trouble reaching Windows audio \u2014 some states may be stale.",
+                    5000);
+            }
         }
     }
 
@@ -526,9 +755,16 @@ internal sealed class TrayApp : Form
         }
 
         if (NativeMethods.RegisterHotKey(Handle, HOTKEY_ID_MAIN, mods, vk))
+        {
             _mainHotkeyRegistered = true;
+        }
         else
+        {
+            // A8-F07 / A8-F12: capture the Win32 error before any other call clears it.
+            int err = System.Runtime.InteropServices.Marshal.GetLastWin32Error();
+            Log.Warn($"RegisterMainHotkey failed for '{_config.Hotkey}': Win32 error {err} (0x{err:X4})");
             ShowTimedTooltip("Could not register hotkey: " + Config.HotkeyToReadable(_config.Hotkey), 5000);
+        }
     }
 
     private void UnregisterMainHotkey()
@@ -558,9 +794,16 @@ internal sealed class TrayApp : Form
         }
 
         if (NativeMethods.RegisterHotKey(Handle, HOTKEY_ID_DEAFEN, mods, vk))
+        {
             _deafenHotkeyRegistered = true;
+        }
         else
+        {
+            // A8-F07 / A8-F12: capture Win32 error immediately.
+            int err = System.Runtime.InteropServices.Marshal.GetLastWin32Error();
+            Log.Warn($"RegisterDeafenHotkey failed for '{_config.DeafenHotkey}': Win32 error {err} (0x{err:X4})");
             ShowTimedTooltip("Could not register deafen hotkey.", 5000);
+        }
     }
 
     private void UnregisterDeafenHotkey()
@@ -591,6 +834,12 @@ internal sealed class TrayApp : Form
             else if (id == HOTKEY_ID_DEAFEN)
             {
                 ToggleDeafen();
+            }
+            else
+            {
+                // A8-F15: log stray WM_HOTKEY IDs — helps diagnose hotkey
+                // conflicts registered by other apps or leaked IDs.
+                Log.Warn($"WM_HOTKEY: unknown id={id}; wParam=0x{m.WParam:X} lParam=0x{m.LParam:X}");
             }
         }
         else if (_wmTaskbarCreated != 0 && m.Msg == (int)_wmTaskbarCreated)
@@ -667,6 +916,10 @@ internal sealed class TrayApp : Form
 
     private void OnUniversalPttPoll(object sender, EventArgs e)
     {
+        // A1-F10: guard against a dispose race where the timer fires one last
+        // time after _pttUniversalTimer.Stop() was called from Dispose().
+        if (_shuttingDown) return;
+
         try
         {
             // Mic unplugged mid-hold or during idle? Stop cleanly. Sync timer
@@ -829,7 +1082,18 @@ internal sealed class TrayApp : Form
         // Any mode change invalidates sticky PTT — the override only makes
         // sense inside PTT mode. Clear it before the mode flips so the
         // persistent OSD doesn't linger under toggle-mode state.
+        bool wasSticky = _pttStickyUnmuted;
         ClearStickyPttOverride();
+
+        // A8-F05: if the sticky override was active the mic is currently
+        // unmuted. The polling timer is about to be torn down, so there is no
+        // release-edge coming to re-mute it. Force-mute now regardless of the
+        // target mode to guarantee the mic is not left hot.
+        if (wasSticky && _audio.HasEndpoint && !_muted)
+        {
+            if (!SetMuteState(true, true))
+                Log.Warn("SetMode: sticky-PTT force-mute failed after mode change — mic may be hot");
+        }
 
         _config.Mode = newMode;
         if (newMode == "push-to-talk")
@@ -867,27 +1131,29 @@ internal sealed class TrayApp : Form
         _menuTitleFont?.Dispose();
         _menuTitleFont = new Font(_trayMenu.Font, FontStyle.Bold);
 
-        // Title — program name + version. Still clickable so it matches the
-        // tray left-click (toggle in Toggle mode, sticky-PTT in PTT mode),
-        // but the label no longer implies "toggle" since that wording was
-        // misleading in PTT mode.
+        // Title — program name + version. Non-interactive header, greyed via
+        // Enabled=false so it reads as a label (like CapsLock's tray header).
         var titleItem = new ToolStripMenuItem("MicMute v" + Config.Version)
         {
             Font = _menuTitleFont,
             TextAlign = ContentAlignment.MiddleCenter,
+            Enabled = false,
         };
-        titleItem.Click += (_, _) => HandleUserToggleClick();
         _trayMenu.Items.Add(titleItem);
         _trayMenu.Items.Add(new ToolStripSeparator());
 
-        // Hotkey — the combo is the label. Click opens Settings (inline
-        // capture lives in the Hotkeys section there). Bold font + bracketing
-        // separators mark it as a reference line, not an ordinary action.
-        string hotkeyDisplay = string.IsNullOrEmpty(_config.Hotkey)
-            ? "(no hotkey bound \u2014 click to set)"
-            : hotkeyReadable;
+        // Hotkey — the combo is the label and the action: click toggles the mic
+        // (matches left-click on the tray icon). Unbound state falls back to
+        // "click to set" which opens Settings.
+        bool hasHotkey = !string.IsNullOrEmpty(_config.Hotkey);
+        string hotkeyDisplay = hasHotkey
+            ? hotkeyReadable
+            : "(no hotkey bound \u2014 click to set)";
         var hotkeyItem = new ToolStripMenuItem(hotkeyDisplay) { Font = _menuTitleFont };
-        hotkeyItem.Click += (_, _) => ShowSettingsDialog();
+        if (hasHotkey)
+            hotkeyItem.Click += (_, _) => HandleUserToggleClick();
+        else
+            hotkeyItem.Click += (_, _) => ShowSettingsDialog();
         _trayMenu.Items.Add(hotkeyItem);
         _trayMenu.Items.Add(new ToolStripSeparator());
 
@@ -923,11 +1189,21 @@ internal sealed class TrayApp : Form
         var soundItem = new ToolStripMenuItem("Sound Settings");
         soundItem.Click += (_, _) =>
         {
-            using var proc = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            // A1-F06: wrap in try/catch — ms-settings: URIs can fail on locked-down
+            // builds (Kiosk mode, policy restrictions) and should degrade gracefully.
+            try
             {
-                FileName = "ms-settings:sound",
-                UseShellExecute = true,
-            });
+                using var proc = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "ms-settings:sound",
+                    UseShellExecute = true,
+                });
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"Could not open Sound Settings: {ex.Message}");
+                ShowTimedTooltip("Couldn't open Sound Settings.\nOpen Settings \u2192 System \u2192 Sound manually.", 5000);
+            }
         };
         _trayMenu.Items.Add(soundItem);
 
@@ -1188,9 +1464,16 @@ internal sealed class TrayApp : Form
         {
             // Exit sticky — re-mute and re-arm polling so PTT works again.
             _pttStickyUnmuted = false;
-            _osdForm.HidePersistent();
-            if (!SetMuteState(true, true))
+            _osdForm?.HidePersistent();
+            bool remuted = SetMuteState(true, true);
+            if (!remuted)
+            {
+                // A8-F08: re-mute on sticky-exit failed — surface to user so they
+                // know the mic may still be open.
                 Log.Warn("Sticky-PTT exit re-mute failed — mic may still be hot");
+                ShowTimedTooltip(
+                    "\u26a0 Couldn't re-mute mic after leaving sticky PTT.\nMic may still be open \u2014 check Windows.", 5000);
+            }
             RegisterMainHotkey();
             ShowTimedTooltip("Push-to-Talk \u2014 hold your hotkey to talk.", 2000);
         }
@@ -1225,7 +1508,7 @@ internal sealed class TrayApp : Form
     {
         if (!_pttStickyUnmuted) return;
         _pttStickyUnmuted = false;
-        _osdForm.HidePersistent();
+        _osdForm?.HidePersistent();
     }
 
     // ── Timed Notification ────────────────────────────────────────────────
@@ -1236,13 +1519,19 @@ internal sealed class TrayApp : Form
         // whatever the caller asked for — important messages (hotkey
         // conflict, mic disconnected, startup errors) need longer than
         // the 3s cap that used to be here.
-        _osdForm.ShowNotification(text, _muted, durationMs);
+        // Null-guard: _osdForm may not exist yet during early ctor paths.
+        _osdForm?.ShowNotification(text, _muted, durationMs);
     }
 
     // ── Exit & Cleanup ───────────────────────────────────────────────────
 
     private void ExitApplication()
     {
+        // BUG-004 / A2-F01: idempotency guard. Double-click on Exit or a race
+        // between the menu click and an in-flight sync tick would otherwise run
+        // COM I/O against an already-released endpoint.
+        if (_shuttingDown) return;
+
         // Claim ownership of exit-time mute state before Dispose chain runs.
         // UnregisterMainHotkey skips its PTT re-mute safety net when this is set.
         _shuttingDown = true;
@@ -1272,44 +1561,50 @@ internal sealed class TrayApp : Form
             // through ExitApplication, the shutdown guard still applies.
             _shuttingDown = true;
 
+            // BUG-002: unsubscribe before any teardown so the resume handler
+            // can't fire against a half-disposed object.
+            try { Microsoft.Win32.SystemEvents.PowerModeChanged -= OnPowerModeChanged; } catch { }
+            try { AppDomain.CurrentDomain.ProcessExit -= OnProcessExit; } catch { }
+
+            // A2-F07: null-guard every field — ctor may have thrown before all
+            // fields were assigned, leaving some null.
+
             // Unregister hotkeys
-            UnregisterMainHotkey();
-            UnregisterDeafenHotkey();
+            try { UnregisterMainHotkey(); } catch { }
+            try { UnregisterDeafenHotkey(); } catch { }
 
             // Stop and dispose timers
-            _syncTimer.Stop();
-            _syncTimer.Dispose();
-
-            _flashTimer.Stop();
-            _flashTimer.Dispose();
+            if (_syncTimer != null) { try { _syncTimer.Stop(); _syncTimer.Dispose(); } catch { } }
+            if (_flashTimer != null) { try { _flashTimer.Stop(); _flashTimer.Dispose(); } catch { } }
 
             if (_pttUniversalTimer != null)
             {
-                _pttUniversalTimer.Stop();
-                _pttUniversalTimer.Dispose();
+                try { _pttUniversalTimer.Stop(); _pttUniversalTimer.Dispose(); } catch { }
                 _pttUniversalTimer = null;
             }
 
             // Dispose OSD
-            _osdForm.Dispose();
+            try { _osdForm?.Dispose(); } catch { }
 
             // Dispose tray icon (set invisible first)
-            _trayIcon.Visible = false;
-            _trayIcon.Dispose();
+            if (_trayIcon != null)
+            {
+                try { _trayIcon.Visible = false; _trayIcon.Dispose(); } catch { }
+            }
 
             // Dispose menu items then menu
-            DisposeMenuItems();
-            _trayMenu.Dispose();
-            _menuTitleFont?.Dispose();
+            try { DisposeMenuItems(); } catch { }
+            try { _trayMenu?.Dispose(); } catch { }
+            try { _menuTitleFont?.Dispose(); } catch { }
 
             // Dispose icons
-            DisposeIcons();
+            try { DisposeIcons(); } catch { }
 
             // Dispose audio
-            _audio.Dispose();
+            try { _audio?.Dispose(); } catch { }
 
             // Dispose dialogs
-            _settingsDialog?.Dispose();
+            try { _settingsDialog?.Dispose(); } catch { }
 
             _disposed = true;
         }

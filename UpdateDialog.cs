@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Threading;
 
 namespace MicMute;
 
@@ -22,6 +23,9 @@ internal sealed class UpdateDialog : Form
     private readonly Button _btnCancel;
     private CancellationTokenSource _cts;
 
+    // In-flight gate — prevents parallel update chains on rapid double-click (A7-F15).
+    private int _inFlight;
+
     private string _remoteVersion;
     private string _downloadUrl;
     private string _hashFileUrl;
@@ -33,6 +37,9 @@ internal sealed class UpdateDialog : Form
     private int _marqueePos;
     private bool _marqueeForward = true;
 
+    // Toast timer stored at class scope so it can be disposed on ApplicationExit (A1-F05).
+    private static System.Windows.Forms.Timer _toastOuterTimer;
+
     private const string AppName = "MicMute";
     private const string GitHubRepo = "itsnateai/MicMute";
 
@@ -42,6 +49,12 @@ internal sealed class UpdateDialog : Form
     private const long MaxJsonBytes = 1_048_576;        //  1 MB for GitHub API JSON
     private const long MaxHashFileBytes = 65_536;       // 64 KB for SHA256SUMS
     private const long MaxExeBytes = 209_715_200;       // 200 MB for MicMute.exe
+
+    // First version tag that emits a SHA256SUMS release asset (BUG-001 / A7-F01).
+    // For any remote version >= this, a missing SHA256SUMS is treated as a
+    // supply-chain error and the update is aborted. Older releases are
+    // grandfathered so existing users can still self-update to this version.
+    private static readonly Version FIRST_HASH_EMITTING_VERSION = new Version(2, 1, 10);
 
     public UpdateDialog()
     {
@@ -54,8 +67,8 @@ internal sealed class UpdateDialog : Form
         AutoScaleMode = AutoScaleMode.Dpi;
         ClientSize = new Size(420, 180);
 
-        _boldFont = new Font("Segoe UI", 9.5f, FontStyle.Bold);
-        _italicFont = new Font("Segoe UI", 7.5f, FontStyle.Italic);
+        _boldFont = new Font(UiTokens.PrimaryFont, 9.5f, FontStyle.Bold);
+        _italicFont = new Font(UiTokens.PrimaryFont, 7.5f, FontStyle.Italic);
 
         _lblStatus = new Label
         {
@@ -89,27 +102,18 @@ internal sealed class UpdateDialog : Form
         {
             Location = new Point(0, 0),
             Size = new Size(0, 18),
-            BackColor = Color.FromArgb(76, 175, 80)
+            BackColor = UiTokens.SuccessGreen
         };
         _progressOuter.Controls.Add(_progressFill);
         Controls.Add(_progressOuter);
 
-        _btnAction = new Button
-        {
-            Text = "Upgrade Now",
-            Location = new Point(155, 112),
-            Size = new Size(110, 32),
-            Visible = false
-        };
+        // A5-F05: port to UiFactory for consistent button height (BtnHeight=28, not 32).
+        _btnAction = UiFactory.MakeWideButton("Upgrade Now", 145, BtnRowY());
+        _btnAction.Visible = false;
         _btnAction.Click += OnActionClick;
         Controls.Add(_btnAction);
 
-        _btnCancel = new Button
-        {
-            Text = "Cancel",
-            Location = new Point(295, 112),
-            Size = new Size(80, 32)
-        };
+        _btnCancel = UiFactory.MakeActionButton("Cancel", 275, BtnRowY());
         _btnCancel.Click += (_, _) =>
         {
             _cts?.Cancel();
@@ -130,6 +134,15 @@ internal sealed class UpdateDialog : Form
         };
 
         Shown += async (_, _) => await CheckForUpdateAsync();
+    }
+
+    // A5-F06: runtime Y for button row — keeps it consistent with ClientSize.
+    private int BtnRowY() => ClientSize.Height - UiTokens.BtnHeight - UiTokens.DialogMargin;
+
+    // A5-F06: center a single button horizontally at runtime.
+    private void CenterSingleButton(Button btn)
+    {
+        btn.Location = new Point((ClientSize.Width - btn.Width) / 2, BtnRowY());
     }
 
     private static HttpClient CreateHttpClient()
@@ -207,7 +220,7 @@ internal sealed class UpdateDialog : Form
             _lblDetail.Text = "Use:  winget upgrade itsnateai.MicMute";
             _btnAction.Visible = false;
             _btnCancel.Text = "OK";
-            _btnCancel.Location = new Point(170, 112);
+            CenterSingleButton(_btnCancel);
             return;
         }
 
@@ -249,6 +262,14 @@ internal sealed class UpdateDialog : Form
             var root = doc.RootElement;
 
             _remoteVersion = root.GetProperty("tag_name").GetString()?.TrimStart('v') ?? "";
+
+            // A7-F19: empty tag_name means the release is malformed — abort rather than
+            // continuing with an empty version string that would silently pass comparisons.
+            if (string.IsNullOrEmpty(_remoteVersion))
+            {
+                ShowError("Could not read version from GitHub release.", "The release tag may be missing or malformed.");
+                return;
+            }
 
             if (root.TryGetProperty("assets", out var assets))
             {
@@ -303,9 +324,19 @@ internal sealed class UpdateDialog : Form
         _progressFill.Location = new Point(0, 0);
 
         var localVersion = Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.0";
-        var isNewer = Version.TryParse(_remoteVersion, out var remote)
-                   && Version.TryParse(localVersion, out var local)
-                   && remote > local;
+
+        // A7-F06: if either TryParse fails, show neutral status rather than
+        // falsely claiming "You're on the latest version!" when we can't compare.
+        if (!Version.TryParse(_remoteVersion, out var remote) ||
+            !Version.TryParse(localVersion, out var local))
+        {
+            _lblDetail.Text = $"Current: {localVersion}  →  GitHub: {_remoteVersion}";
+            _progressOuter.Visible = false;
+            ShowError("Could not compare versions.", "Try again or check the GitHub releases page manually.");
+            return;
+        }
+
+        bool isNewer = remote > local;
 
         _lblDetail.Text = $"Current: {localVersion}  →  GitHub: {_remoteVersion}";
         _progressOuter.Visible = false;
@@ -313,16 +344,20 @@ internal sealed class UpdateDialog : Form
         if (isNewer)
         {
             _lblStatus.Text = "A new version is available!";
+            _lblStatus.ForeColor = SystemColors.ControlText;
             _btnAction.Text = "Upgrade Now";
             _btnAction.Visible = true;
+            _btnAction.Location = new Point(145, BtnRowY());
             _btnCancel.Text = "Cancel";
+            _btnCancel.Location = new Point(275, BtnRowY());
         }
         else
         {
             _lblStatus.Text = "You're on the latest version!";
+            _lblStatus.ForeColor = SystemColors.ControlText;
             _btnAction.Visible = false;
             _btnCancel.Text = "OK";
-            _btnCancel.Location = new Point(170, 112);
+            CenterSingleButton(_btnCancel);
         }
     }
 
@@ -330,14 +365,35 @@ internal sealed class UpdateDialog : Form
 
     private async void OnActionClick(object sender, EventArgs e)
     {
+        // A7-F15: prevent parallel update chains on rapid double-click.
+        if (Interlocked.CompareExchange(ref _inFlight, 1, 0) != 0)
+            return;
+
+        try
+        {
+            await DoUpdateAsync();
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _inFlight, 0);
+        }
+    }
+
+    private async Task DoUpdateAsync()
+    {
         _btnAction.Enabled = false;
         _btnCancel.Text = "Cancel";
         _progressOuter.Visible = true;
         _progressFill.Location = new Point(0, 0);
         _lblStatus.Text = $"Downloading {AppName} {_remoteVersion}...";
 
-        _cts?.Dispose();
+        // A7-F04: cancel and dispose the old CTS before reassigning to prevent
+        // in-flight continuations from outliving their token.
+        var oldCts = _cts;
         _cts = new CancellationTokenSource();
+        try { oldCts?.Cancel(); } catch (ObjectDisposedException) { }
+        try { oldCts?.Dispose(); } catch (ObjectDisposedException) { }
+
         // Capture once — if the field is reassigned by a concurrent click sequence,
         // our awaits stay pinned to the token we started with.
         var ct = _cts.Token;
@@ -358,8 +414,30 @@ internal sealed class UpdateDialog : Form
             if (!await DownloadFileAsync(_downloadUrl!, newPath, ct))
                 return;
 
-            // Verify SHA256 hash if the release includes a SHA256SUMS file
-            if (!string.IsNullOrEmpty(_hashFileUrl))
+            // ─── SHA256 integrity gate (BUG-001 / A7-F01) ──────────────────────
+            // Version-gated fail-closed: if the remote release is >= FIRST_HASH_EMITTING_VERSION
+            // and no SHA256SUMS asset was found, abort rather than installing unverified.
+            // Grandfathered older releases (< 2.1.10) keep the skip-with-log behavior so
+            // users upgrading from very old builds can still reach 2.1.10 safely.
+            if (string.IsNullOrEmpty(_hashFileUrl))
+            {
+                bool isGrandfathered = Version.TryParse(_remoteVersion, out var remoteVer)
+                                    && remoteVer < FIRST_HASH_EMITTING_VERSION;
+                if (isGrandfathered)
+                {
+                    Log.Warn($"Update verify SKIPPED (grandfathered release {_remoteVersion} < {FIRST_HASH_EMITTING_VERSION})");
+                    // continue to apply
+                }
+                else
+                {
+                    TryDelete(newPath);
+                    Log.Error($"Update aborted: SHA256SUMS missing for release {_remoteVersion} (>= {FIRST_HASH_EMITTING_VERSION}). Fail-closed.");
+                    ShowError("Update integrity file missing. Download manually from GitHub.",
+                        $"SHA256SUMS was not found in release {_remoteVersion}. Aborting for security.");
+                    return;
+                }
+            }
+            else
             {
                 // Apply the same origin allowlist to the checksum file. Both
                 // URLs come from the GitHub releases API today, but verifying
@@ -390,9 +468,11 @@ internal sealed class UpdateDialog : Form
                     foreach (var line in hashContent.Split('\n', StringSplitOptions.RemoveEmptyEntries))
                     {
                         // Format: "hexhash  filename" or "hexhash *filename"
+                        // A7-F11: use Path.GetFileName so entries like "./MicMute.exe" also match.
                         var parts = line.Split(new[] { ' ', '\t' }, 2, StringSplitOptions.RemoveEmptyEntries);
                         if (parts.Length == 2 &&
-                            parts[1].Trim().TrimStart('*').Equals("MicMute.exe", StringComparison.OrdinalIgnoreCase))
+                            Path.GetFileName(parts[1].Trim().TrimStart('*'))
+                                .Equals("MicMute.exe", StringComparison.OrdinalIgnoreCase))
                         {
                             expectedHash = parts[0].Trim();
                             break;
@@ -409,6 +489,7 @@ internal sealed class UpdateDialog : Form
                                 "The downloaded file doesn't match the expected SHA256 checksum.");
                             return;
                         }
+                        Log.Info($"Update verified via SHA256SUMS (remote={_remoteVersion})");
                     }
                     else
                     {
@@ -435,39 +516,140 @@ internal sealed class UpdateDialog : Form
             _lblStatus.Text = "Applying update...";
             _progressOuter.Visible = false;
 
-            TryDelete(oldPath);
-            if (File.Exists(exePath))
-                File.Move(exePath, oldPath);
-            File.Move(newPath, exePath);
-
-            using var _ = Process.Start(new ProcessStartInfo(exePath)
+            // BUG-005: replace the three-line TryDelete+Move+Move sequence with a single
+            // File.Replace call. On NTFS this is a near-atomic rename-pair: exePath→oldPath
+            // and newPath→exePath happen as one logical operation, eliminating the window
+            // where the exe is absent from disk.
+            // Log distinct failure modes so support can distinguish "stale .old" from swap failure.
+            if (File.Exists(oldPath))
             {
-                Arguments = "--after-update",
-                UseShellExecute = true
-            });
-            Application.Exit();
+                // Stale .old from a prior interrupted update — must clear it first because
+                // File.Replace uses it as the backup destination and will fail if it already exists
+                // on some NTFS configurations.
+                try { File.Delete(oldPath); }
+                catch (Exception ex)
+                {
+                    Log.Error($"Update apply: could not clear stale .old file at {oldPath}", ex);
+                    ShowError("Failed to apply update.",
+                        "A leftover file from a previous update is blocking the install. Delete MicMute.exe.old and retry.");
+                    TryDelete(newPath);
+                    return;
+                }
+            }
+
+            try
+            {
+                File.Replace(newPath, exePath, oldPath, ignoreMetadataErrors: true);
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"Update apply: File.Replace(new→exe, backup→old) failed", ex);
+                // newPath still exists (Replace failed before touching exePath), so rollback just cleans it.
+                TryDelete(newPath);
+                ShowError(
+                    ex.Message.Contains("being used by another process", StringComparison.OrdinalIgnoreCase)
+                        ? "Cannot replace the executable." : "Failed to apply update.",
+                    ex.Message.Contains("being used by another process", StringComparison.OrdinalIgnoreCase)
+                        ? "Your antivirus may be locking the file. Try again." : ex.Message);
+                return;
+            }
+
+            // BUG-003: capture the Process return value and verify the child actually started.
+            // Do NOT delete .old here — leave it for CleanupUpdateArtifacts on --after-update
+            // entry as a proof-of-life safety net. If the child dies immediately, roll back.
+            Process proc;
+            try
+            {
+                proc = Process.Start(new ProcessStartInfo(exePath)
+                {
+                    Arguments = "--after-update",
+                    UseShellExecute = true,
+                    // A7-F07: set working directory explicitly so the child doesn't inherit
+                    // a temp CWD that may not be accessible under all deployment scenarios.
+                    WorkingDirectory = Path.GetDirectoryName(exePath) ?? ""
+                });
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Update restart: Process.Start failed", ex);
+                RollbackUpdate(exePath, oldPath, newPath);
+                ShowError("Update applied but restart failed.", "Please relaunch MicMute manually.");
+                return;
+            }
+
+            if (proc == null)
+            {
+                Log.Error("Update restart: Process.Start returned null");
+                RollbackUpdate(exePath, oldPath, newPath);
+                ShowError("Update applied but restart failed.", "Please relaunch MicMute manually.");
+                return;
+            }
+
+            // Brief wait so the child has time to start its message pump. We're
+            // about to call Application.Exit so UI-thread sleep is acceptable here.
+            try { proc.WaitForInputIdle(2000); } catch { }
+
+            if (proc.HasExited)
+            {
+                Log.Error($"Update restart: new exe exited immediately (ExitCode={proc.ExitCode}). Rolling back.");
+                proc.Dispose();
+                RollbackUpdate(exePath, oldPath, newPath);
+                ShowError("Update applied but new version failed to start.",
+                    "The new executable exited immediately. Rolled back. Try again or download manually from GitHub.");
+                return;
+            }
+
+            proc.Dispose();
+
+            // A2-F12: cancel the CTS before exiting so any in-flight continuations
+            // don't attempt UI updates on a disposed context. Wrap Application.Exit
+            // defensively in case we're already shutting down.
+            try { _cts?.Cancel(); } catch (ObjectDisposedException) { }
+            try { Application.Exit(); } catch { }
         }
         catch (IOException ex)
         {
             Log.Error("Update apply failed (IO)", ex);
-            RollbackUpdate(exePath, oldPath, newPath);
-
-            ShowError(
-                ex.Message.Contains("being used by another process", StringComparison.OrdinalIgnoreCase)
-                    ? "Cannot replace the executable." : "Failed to apply update.",
-                ex.Message.Contains("being used by another process", StringComparison.OrdinalIgnoreCase)
-                    ? "Your antivirus may be locking the file. Try again." : ex.Message);
+            // A3-F08: wrap RollbackUpdate+ShowError in an inner try so a secondary
+            // fault during rollback doesn't propagate out of the async void chain.
+            try
+            {
+                RollbackUpdate(exePath, oldPath, newPath);
+                ShowError(
+                    ex.Message.Contains("being used by another process", StringComparison.OrdinalIgnoreCase)
+                        ? "Cannot replace the executable." : "Failed to apply update.",
+                    ex.Message.Contains("being used by another process", StringComparison.OrdinalIgnoreCase)
+                        ? "Your antivirus may be locking the file. Try again." : ex.Message);
+            }
+            catch (Exception inner)
+            {
+                Log.Error("Update: secondary fault during IO-error rollback", inner);
+            }
         }
         catch (TaskCanceledException)
         {
-            RollbackUpdate(exePath, oldPath, newPath);
-            if (!IsDisposed) ShowVersionComparison();
+            try
+            {
+                RollbackUpdate(exePath, oldPath, newPath);
+                if (IsHandleCreated && !IsDisposed) ShowVersionComparison();
+            }
+            catch (Exception inner)
+            {
+                Log.Error("Update: secondary fault during cancel rollback", inner);
+            }
         }
         catch (Exception ex)
         {
             Log.Error("Update apply failed", ex);
-            RollbackUpdate(exePath, oldPath, newPath);
-            if (!IsDisposed) ShowError("Update failed.", ex.Message);
+            try
+            {
+                RollbackUpdate(exePath, oldPath, newPath);
+                if (IsHandleCreated && !IsDisposed) ShowError("Update failed.", ex.Message);
+            }
+            catch (Exception inner)
+            {
+                Log.Error("Update: secondary fault during exception rollback", inner);
+            }
         }
     }
 
@@ -516,18 +698,29 @@ internal sealed class UpdateDialog : Form
             }
             await fileStream.WriteAsync(buffer.AsMemory(0, read), ct);
 
-            if (totalBytes > 0 && !IsDisposed) BeginInvoke(() =>
+            // A5-F07: wrap BeginInvoke in try/catch to defend against ObjectDisposedException
+            // if the dialog is closed while a download is still in progress.
+            if (totalBytes > 0 && IsHandleCreated && !IsDisposed)
             {
-                if (IsDisposed) return;
-                int pct = (int)(downloaded * 100 / totalBytes);
-                _progressFill.Size = new Size(
-                    (int)(_progressOuter.Width * downloaded / totalBytes), 18);
-                var dlMB = downloaded / (1024.0 * 1024.0);
-                var totalMB = totalBytes / (1024.0 * 1024.0);
-                _lblDetail.Text = totalMB < 1
-                    ? $"{pct}% ({downloaded / 1024.0:F0} / {totalBytes / 1024.0:F0} KB)"
-                    : $"{pct}% ({dlMB:F0} / {totalMB:F0} MB)";
-            });
+                try
+                {
+                    BeginInvoke(() =>
+                    {
+                        if (IsHandleCreated && !IsDisposed)
+                        {
+                            int pct = (int)(downloaded * 100 / totalBytes);
+                            _progressFill.Size = new Size(
+                                (int)(_progressOuter.Width * downloaded / totalBytes), 18);
+                            var dlMB = downloaded / (1024.0 * 1024.0);
+                            var totalMB = totalBytes / (1024.0 * 1024.0);
+                            _lblDetail.Text = totalMB < 1
+                                ? $"{pct}% ({downloaded / 1024.0:F0} / {totalBytes / 1024.0:F0} KB)"
+                                : $"{pct}% ({dlMB:F0} / {totalMB:F0} MB)";
+                        }
+                    });
+                }
+                catch (InvalidOperationException) { } // includes ObjectDisposedException
+            }
         }
 
         if (totalBytes > 0 && downloaded != totalBytes)
@@ -557,11 +750,11 @@ internal sealed class UpdateDialog : Form
         _marqueeTimer.Stop();
         _progressOuter.Visible = false;
         _lblStatus.Text = message;
-        _lblStatus.ForeColor = Color.FromArgb(255, 152, 0);
+        _lblStatus.ForeColor = UiTokens.WarnOrange;
         _lblDetail.Text = detail;
         _btnAction.Visible = false;
         _btnCancel.Text = "OK";
-        _btnCancel.Location = new Point(170, 112);
+        CenterSingleButton(_btnCancel);
     }
 
     // ─── Static Helpers (called from Program.cs) ────────────────
@@ -570,11 +763,23 @@ internal sealed class UpdateDialog : Form
     /// <remarks>
     /// User-scope installs:    %LOCALAPPDATA%\Microsoft\WinGet\Packages\...
     /// Machine-scope installs: %ProgramFiles%\WinGet\Packages\...
-    /// The narrower prefix `Microsoft\WinGet\Packages` misses machine-scope.
-    /// Match just `\WinGet\Packages\` so both flavors are detected.
+    /// A7-F18: resolve %LOCALAPPDATA% at runtime and match the full user-scope path prefix
+    /// to avoid false positives from directories that merely contain "WinGet\Packages\" in
+    /// their name. Machine-scope falls back to the looser suffix check.
     /// </remarks>
-    internal static bool IsWingetManaged() =>
-        (Environment.ProcessPath ?? "").Contains(@"\WinGet\Packages\", StringComparison.OrdinalIgnoreCase);
+    internal static bool IsWingetManaged()
+    {
+        var path = Environment.ProcessPath ?? "";
+        // User-scope (most common): %LOCALAPPDATA%\Microsoft\WinGet\Packages\...
+        var localApp = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var userScope = Path.Combine(localApp, "Microsoft", "WinGet", "Packages") + Path.DirectorySeparatorChar;
+        if (path.StartsWith(userScope, StringComparison.OrdinalIgnoreCase))
+            return true;
+        // Machine-scope: %ProgramFiles%\WinGet\Packages\...
+        if (path.Contains(@"\WinGet\Packages\", StringComparison.OrdinalIgnoreCase))
+            return true;
+        return false;
+    }
 
     /// <summary>Clean up .old/.new artifacts from a previous update.</summary>
     internal static void CleanupUpdateArtifacts()
@@ -589,12 +794,23 @@ internal sealed class UpdateDialog : Form
             var oldPath = exePath + ".old";
             if (File.Exists(oldPath))
             {
+                // A7-F17: sanity-check the .old file size before restoring — a zero-byte or
+                // suspiciously tiny file is more likely corruption than a valid executable.
+                // Self-contained .NET single-file binaries are always several MB.
+                const long MinValidExeBytes = 1_000_000;
+                var oldSize = new FileInfo(oldPath).Length;
+                if (oldSize < MinValidExeBytes)
+                {
+                    Log.Error($"Torn-state recovery: .old file is suspiciously small ({oldSize} bytes); skipping restore to avoid replacing exe with corrupt data.");
+                    return;
+                }
                 try { File.Move(oldPath, exePath); }
                 catch (Exception ex) { Log.Error("Torn-state recovery failed — exe missing and .old restore failed", ex); }
             }
             return;
         }
 
+        // Clean up .old (proof-of-life from prior successful restart) and .new (partial download).
         foreach (var suffix in new[] { ".old", ".new" })
         {
             var path = exePath + suffix;
@@ -607,49 +823,82 @@ internal sealed class UpdateDialog : Form
     internal static void ShowUpdateToast()
     {
         var version = Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "?";
-        var timer = new System.Windows.Forms.Timer { Interval = 1500 };
-        timer.Tick += (_, _) =>
+
+        // A1-F05: store the outer timer in a static field and hook ApplicationExit so it
+        // can be stopped and disposed if the application exits before the tick fires.
+        // Also wrap Form construction in try/catch so a Font allocation failure doesn't
+        // leak the timer.
+        _toastOuterTimer = new System.Windows.Forms.Timer { Interval = 1500 };
+        Application.ApplicationExit += OnApplicationExitCleanupToastTimer;
+
+        _toastOuterTimer.Tick += (_, _) =>
         {
-            timer.Stop();
-            timer.Dispose();
+            _toastOuterTimer.Stop();
+            _toastOuterTimer.Dispose();
+            _toastOuterTimer = null;
+            Application.ApplicationExit -= OnApplicationExitCleanupToastTimer;
 
-            var toast = new Form
+            Form toast = null;
+            Font toastFont = null;
+            try
             {
-                FormBorderStyle = FormBorderStyle.None,
-                ShowInTaskbar = false,
-                TopMost = true,
-                StartPosition = FormStartPosition.Manual,
-                BackColor = Color.FromArgb(240, 240, 240),
-                AutoSize = true,
-                AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                Padding = new Padding(12, 8, 12, 8)
-            };
-            var toastFont = new Font("Segoe UI", 9.5f, FontStyle.Bold);
-            var lbl = new Label
-            {
-                Text = $"\u2705 {AppName} updated to v{version}!",
-                AutoSize = true,
-                Font = toastFont,
-                ForeColor = Color.FromArgb(30, 30, 30)
-            };
-            toast.Controls.Add(lbl);
-            toast.FormClosed += (_, _) => toastFont.Dispose();
+                toastFont = new Font(UiTokens.PrimaryFont, 9.5f, FontStyle.Bold);
+                toast = new Form
+                {
+                    FormBorderStyle = FormBorderStyle.None,
+                    ShowInTaskbar = false,
+                    TopMost = true,
+                    StartPosition = FormStartPosition.Manual,
+                    BackColor = Color.FromArgb(240, 240, 240),
+                    AutoSize = true,
+                    AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                    Padding = new Padding(12, 8, 12, 8)
+                };
+                var lbl = new Label
+                {
+                    Text = $"\u2705 {AppName} updated to v{version}!",
+                    AutoSize = true,
+                    Font = toastFont,
+                    ForeColor = Color.FromArgb(30, 30, 30)
+                };
+                toast.Controls.Add(lbl);
+                toast.FormClosed += (_, _) => toastFont?.Dispose();
 
-            var screen = (Screen.PrimaryScreen ?? Screen.AllScreens[0]).WorkingArea;
-            toast.Load += (_, _) =>
-                toast.Location = new Point(screen.Right - toast.Width - 20, screen.Bottom - toast.Height - 20);
-            toast.Show();
+                var screen = (Screen.PrimaryScreen ?? Screen.AllScreens[0]).WorkingArea;
+                toast.Load += (_, _) =>
+                    toast.Location = new Point(screen.Right - toast.Width - 20, screen.Bottom - toast.Height - 20);
+                toast.Show();
 
-            var dismiss = new System.Windows.Forms.Timer { Interval = 5000 };
-            dismiss.Tick += (_, _) =>
+                var dismiss = new System.Windows.Forms.Timer { Interval = 5000 };
+                dismiss.Tick += (_, _) =>
+                {
+                    dismiss.Stop();
+                    dismiss.Dispose();
+                    if (!toast.IsDisposed) toast.Close();
+                };
+                dismiss.Start();
+            }
+            catch (Exception ex)
             {
-                dismiss.Stop();
-                dismiss.Dispose();
-                toast.Close();
-            };
-            dismiss.Start();
+                // If toast construction fails, dispose what was allocated and log — don't crash.
+                Log.Error("ShowUpdateToast: failed to show toast", ex);
+                toastFont?.Dispose();
+                toast?.Dispose();
+            }
         };
-        timer.Start();
+        _toastOuterTimer.Start();
+    }
+
+    private static void OnApplicationExitCleanupToastTimer(object sender, EventArgs e)
+    {
+        try
+        {
+            _toastOuterTimer?.Stop();
+            _toastOuterTimer?.Dispose();
+            _toastOuterTimer = null;
+        }
+        catch { }
+        Application.ApplicationExit -= OnApplicationExitCleanupToastTimer;
     }
 
     // ─── Helpers ────────────────────────────────────────────────

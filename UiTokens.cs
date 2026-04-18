@@ -48,13 +48,16 @@ internal static class UiTokens
     public static readonly Color GreyTextColor  = Color.FromArgb(0x99, 0x99, 0x99);
     public static readonly Color FocusYellow    = Color.FromArgb(0xFF, 0xF8, 0xDC);
     public static readonly Color ErrorTint      = Color.FromArgb(0xFF, 0xF0, 0xF0);
+    // Progress / status colors used by UpdateDialog (A5-F05).
+    public static readonly Color SuccessGreen   = Color.FromArgb(76, 175, 80);
+    public static readonly Color WarnOrange     = Color.FromArgb(255, 152, 0);
 
     // ── Fonts ───────────────────────────────────────────────────────────
     public const string PrimaryFont         = "Segoe UI";
     public const string SemiboldFont        = "Segoe UI Semibold";
-    public const float  DialogFontSize      = 9f;
+    public const float  DialogFontSize      = 9.5f;
     public const float  ModalFontSize       = 10f;
-    public const float  SectionHeaderSize   = 9f;
+    public const float  SectionHeaderSize   = 9.5f;
     public const float  HelpTitleSize       = 13.5f;
     public const float  HelpHeaderSize      = 10.75f;
 }

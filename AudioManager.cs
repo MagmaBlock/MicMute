@@ -59,7 +59,10 @@ internal sealed class AudioManager : IDisposable
         int hr = CoCreateInstance(ref clsid, 0, 1 /*CLSCTX_INPROC_SERVER*/,
             ref iid, out pEnum);
         if (hr < 0 || pEnum == 0)
+        {
+            Log.Warn($"Initialize: CoCreateInstance failed, hr=0x{hr:X8}");
             return false;
+        }
 
         nint pDev = 0;
         if (!string.IsNullOrEmpty(deviceId))
@@ -80,13 +83,26 @@ internal sealed class AudioManager : IDisposable
         Marshal.Release(pEnum);
 
         if (hr < 0 || pDev == 0)
+        {
+            Log.Warn($"Initialize: GetDevice/GetDefaultEndpoint failed, hr=0x{hr:X8}");
             return false;
+        }
 
         hr = ComCall_Activate(pDev, out nint pAEV);
         Marshal.Release(pDev);
 
-        if (hr < 0 || pAEV == 0)
+        // A1-F02 / A4-F02: if Activate fails but driver wrote pAEV non-zero, release defensively
+        if (hr < 0)
+        {
+            Log.Warn($"Initialize: Activate failed, hr=0x{hr:X8}");
+            if (pAEV != 0) Marshal.Release(pAEV);
             return false;
+        }
+        if (pAEV == 0)
+        {
+            Log.Warn($"Initialize: Activate returned null interface, hr=0x{hr:X8}");
+            return false;
+        }
 
         _pAudioEndpointVolume = pAEV;
         return true;
@@ -116,8 +132,9 @@ internal sealed class AudioManager : IDisposable
                 return null;
             return muted != 0;
         }
-        catch
+        catch (Exception ex)
         {
+            Log.Warn("GetMute threw: " + ex.Message);
             return null;
         }
     }
@@ -135,8 +152,9 @@ internal sealed class AudioManager : IDisposable
             int hr = ComCall_SetMute(_pAudioEndpointVolume, muted ? 1 : 0);
             return hr >= 0;
         }
-        catch
+        catch (Exception ex)
         {
+            Log.Warn("SetMute threw: " + ex.Message);
             return false;
         }
     }
@@ -158,11 +176,15 @@ internal sealed class AudioManager : IDisposable
         {
             // EnumAudioEndpoints(eCapture=1, DEVICE_STATE_ACTIVE=1)
             hr = ComCall_EnumEndpoints(pEnum, out nint pCollection);
-            if (hr < 0 || pCollection == 0)
-                return devices;
 
+            // A1-F15: move the early-return inside the inner try so the finally's
+            // Marshal.Release(pCollection) runs even on HRESULT-violation where the
+            // driver may have written a non-zero pCollection before failing.
             try
             {
+                if (hr < 0 || pCollection == 0)
+                    return devices;
+
                 hr = ComCall_GetCount(pCollection, out int count);
                 if (hr < 0)
                     return devices;
@@ -188,7 +210,7 @@ internal sealed class AudioManager : IDisposable
             }
             finally
             {
-                Marshal.Release(pCollection);
+                if (pCollection != 0) Marshal.Release(pCollection);
             }
         }
         finally
@@ -212,8 +234,9 @@ internal sealed class AudioManager : IDisposable
             int hr = ComCall_GetMuteStatic(pAEV, out int muted);
             return hr >= 0 && muted != 0;
         }
-        catch
+        catch (Exception ex)
         {
+            Log.Warn("GetSpeakerMute threw: " + ex.Message);
             return false;
         }
         finally
@@ -234,9 +257,9 @@ internal sealed class AudioManager : IDisposable
         {
             ComCall_SetMuteStatic(pAEV, muted ? 1 : 0);
         }
-        catch
+        catch (Exception ex)
         {
-            // Speaker mute is best-effort
+            Log.Warn("SetSpeakerMute threw: " + ex.Message);
         }
         finally
         {
@@ -262,7 +285,15 @@ internal sealed class AudioManager : IDisposable
             try
             {
                 hr = ComCall_Activate(pDev, out nint pAEV);
-                return hr >= 0 ? pAEV : 0;
+                // A3-F12: log on failure so bad service state doesn't look like "no speakers"
+                // A1-F03: if driver wrote pAEV non-zero before failing, release defensively
+                if (hr < 0)
+                {
+                    Log.Warn($"GetDefaultRenderEndpointVolume: Activate failed, hr=0x{hr:X8}");
+                    if (pAEV != 0) Marshal.Release(pAEV);
+                    return 0;
+                }
+                return pAEV;
             }
             finally
             {
@@ -284,9 +315,15 @@ internal sealed class AudioManager : IDisposable
         int hr = getId(pDev, out nint pIdStr);
         if (hr < 0 || pIdStr == 0)
             return "";
-        string id = Marshal.PtrToStringUni(pIdStr) ?? "";
-        Marshal.FreeCoTaskMem(pIdStr);
-        return id;
+        // A4-F04: ensure FreeCoTaskMem runs even if PtrToStringUni throws
+        try
+        {
+            return Marshal.PtrToStringUni(pIdStr) ?? "";
+        }
+        finally
+        {
+            Marshal.FreeCoTaskMem(pIdStr);
+        }
     }
 
     private static string GetDeviceFriendlyName(nint pDev)
@@ -329,11 +366,8 @@ internal sealed class AudioManager : IDisposable
                     if (vt == 31) // VT_LPWSTR
                     {
                         nint pStr = Marshal.ReadIntPtr(pv, 8);
-                        string name = pStr != 0 ? (Marshal.PtrToStringUni(pStr) ?? "") : "";
-                        PropVariantClear(pv);
-                        return name;
+                        return pStr != 0 ? (Marshal.PtrToStringUni(pStr) ?? "") : "";
                     }
-                    PropVariantClear(pv);
                     return "";
                 }
                 finally
@@ -343,6 +377,9 @@ internal sealed class AudioManager : IDisposable
             }
             finally
             {
+                // A1-F01: PropVariantClear unconditional — handles HRESULT-violation where
+                // callee wrote VT+payload before failing; must precede FreeCoTaskMem.
+                PropVariantClear(pv);
                 Marshal.FreeCoTaskMem(pv);
             }
         }
@@ -410,7 +447,7 @@ internal sealed class AudioManager : IDisposable
         nint fnPtr = Marshal.ReadIntPtr(vtable, VT_Activate * nint.Size);
         var fn = Marshal.GetDelegateForFunctionPointer<ActivateDelegate>(fnPtr);
         var iidAEV = IID_IAudioEndpointVolume;
-        return fn(pDev, ref iidAEV, 1, 0, out pAEV);
+        return fn(pDev, in iidAEV, 1, 0, out pAEV);
     }
 
     private int ComCall_GetMute(nint pAEV, out int muted)
@@ -462,7 +499,7 @@ internal sealed class AudioManager : IDisposable
     private delegate int ItemDelegate(nint pThis, int nDevice, out nint ppDevice);
 
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-    private delegate int ActivateDelegate(nint pThis, ref Guid iid, int dwClsCtx, nint pActivationParams, out nint ppInterface);
+    private delegate int ActivateDelegate(nint pThis, in Guid iid, int dwClsCtx, nint pActivationParams, out nint ppInterface);
 
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
     private delegate int GetMuteDelegate(nint pThis, out int pbMute);

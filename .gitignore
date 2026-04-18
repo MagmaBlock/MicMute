@@ -24,6 +24,11 @@ AUDIT_TASKS.md
 FINAL_REPORT.md
 CLAUDE.md
 
+# Session artifacts (audit swarm, buglists, plans — private to dev sessions)
+.audit/
+AUDIT_PLAN.md
+MASTER_BUGLIST.md
+
 # IDE / Editor
 .vscode/
 .idea/

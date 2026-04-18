@@ -22,6 +22,11 @@ internal sealed class SettingsDialog : Form
     // Hotkeys — captured values update via the compact-row helper.
     private string _capturedMainHK = "";
     private string _capturedDeafenHK = "";
+    // Cached "use it anyway" confirmations — set by ValidateHotkeysBeforeApply,
+    // committed to _config by ApplySettings. Prevents re-warning the user on
+    // repeated Apply/Save when the hotkey is unchanged.
+    private string _pendingAckedMainHk;
+    private string _pendingAckedDeafenHk;
 
     // When a hotkey row is in capture mode, these hold callbacks that
     // ProcessCmdKey below invokes instead of letting Esc/Enter trigger
@@ -29,14 +34,16 @@ internal sealed class SettingsDialog : Form
     private Action _capturingCancel;
     private Action _capturingCommit;
 
-    // Custom files
-    private readonly TextBox _edtIconMuted;
+    // Custom files — paths held as string fields (updated by closure callbacks
+    // from AddCompactFileRow). Display TextBoxes named _lbl* show only the
+    // filename. No hidden phantom TextBox controls parented to the form.
+    private string _pathIconMuted  = "";
+    private string _pathIconActive = "";
+    private string _pathMuteSound  = "";
+    private string _pathUnmuteSound = "";
     private readonly TextBox _lblIconMuted;
-    private readonly TextBox _edtIconActive;
     private readonly TextBox _lblIconActive;
-    private readonly TextBox _edtMuteSound;
     private readonly TextBox _lblMuteSound;
-    private readonly TextBox _edtUnmuteSound;
     private readonly TextBox _lblUnmuteSound;
     private ToolTip _fileRowTooltip;
 
@@ -52,7 +59,7 @@ internal sealed class SettingsDialog : Form
         MinimizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
         BackColor = Color.White;
-        _dialogFont = new Font("Segoe UI", 9f);
+        _dialogFont = new Font(UiTokens.PrimaryFont, UiTokens.DialogFontSize);
         Font = _dialogFont;
         AutoScaleMode = AutoScaleMode.Dpi;
 
@@ -97,23 +104,15 @@ internal sealed class SettingsDialog : Form
         // Per-cell hints stacked vertically beneath the two-column row.
         // Both span the full section width — cell-width clipping would
         // have forced too-terse phrasing.
-        var toggleHint = new Label
-        {
-            Text = "Toggle Mute: mutes / unmutes your mic. In Push-to-Talk mode, hold to talk.",
-            AutoSize = true,
-            ForeColor = Color.FromArgb(0x88, 0x88, 0x88),
-            Location = new Point(indent, y),
-        };
+        var toggleHint = UiFactory.MakeHintLabel(
+            "Toggle Mute: mutes / unmutes your mic. In Push-to-Talk mode, hold to talk.",
+            indent, y);
         Controls.Add(toggleHint);
         y += toggleHint.Height + 2;
 
-        var deafenHint = new Label
-        {
-            Text = "Deafen: mutes your mic AND your speakers at the same time.",
-            AutoSize = true,
-            ForeColor = Color.FromArgb(0x88, 0x88, 0x88),
-            Location = new Point(indent, y),
-        };
+        var deafenHint = UiFactory.MakeHintLabel(
+            "Deafen: mutes your mic AND your speakers at the same time.",
+            indent, y);
         Controls.Add(deafenHint);
         y += deafenHint.Height + 10;
 
@@ -149,13 +148,7 @@ internal sealed class SettingsDialog : Form
         };
         Controls.Add(_edtOsdDuration);
 
-        var durLabel = new Label
-        {
-            Text = "Duration (ms):",
-            AutoSize = true,
-            ForeColor = Color.FromArgb(0x88, 0x88, 0x88),
-            Location = new Point(0, osdRowY + 3),
-        };
+        var durLabel = UiFactory.MakeHintLabel("Duration (ms):", 0, osdRowY + 3);
         Controls.Add(durLabel);
         durLabel.Left = _edtOsdDuration.Left - durLabel.PreferredWidth - 6;
 
@@ -172,13 +165,9 @@ internal sealed class SettingsDialog : Form
             Location = new Point(indent, y),
         };
         Controls.Add(_chkMuteLock);
-        var muteLockHint = new Label
-        {
-            Text = "\u2014  reverts external mute changes every 15 seconds (not instant).",
-            AutoSize = true,
-            ForeColor = Color.FromArgb(0x88, 0x88, 0x88),
-            Location = new Point(_chkMuteLock.Right + 4, y + 1),
-        };
+        var muteLockHint = UiFactory.MakeHintLabel(
+            "\u2014  reverts external mute changes every 15 seconds (not instant).",
+            _chkMuteLock.Right + 4, y + 1);
         Controls.Add(muteLockHint);
         y += _chkMuteLock.Height + 4;
         _chkMiddleClick = AddCheckBox("Middle-click tray icon to toggle Toggle/PTT mode", indent, ref y, config.MiddleClickToggle);
@@ -220,7 +209,7 @@ internal sealed class SettingsDialog : Form
 
         var startLabel = new Label
         {
-            Text = "On startup:",
+            Text = "Mic mode On Startup:",
             AutoSize = true,
             Location = new Point(0, rowY + 3),
         };
@@ -237,13 +226,7 @@ internal sealed class SettingsDialog : Form
         {
             // Right-align the hint under the "On startup:" dropdown so it
             // reads as a caption on that control, not a general-section note.
-            var pttHintLabel = new Label
-            {
-                Text = "Push-to-Talk mode always starts muted.",
-                AutoSize = true,
-                ForeColor = Color.FromArgb(0x88, 0x88, 0x88),
-                Location = new Point(0, y),
-            };
+            var pttHintLabel = UiFactory.MakeHintLabel("Push-to-Talk mode always starts muted.", 0, y);
             Controls.Add(pttHintLabel);
             pttHintLabel.Left = sectionRight - pttHintLabel.PreferredWidth;
             y += 20;
@@ -266,11 +249,16 @@ internal sealed class SettingsDialog : Form
         int col1X = sectionInnerLeft;
         int col2X = sectionInnerLeft + cellW + colGap;
 
-        (_edtIconMuted,   _lblIconMuted)   = AddCompactFileRow("Muted icon",   config.IconMuted,   "Icon files (*.ico)|*.ico",   col1X, y, cellW);
-        (_edtIconActive,  _lblIconActive)  = AddCompactFileRow("Active icon",  config.IconActive,  "Icon files (*.ico)|*.ico",   col2X, y, cellW);
+        _pathIconMuted   = config.IconMuted;
+        _pathIconActive  = config.IconActive;
+        _pathMuteSound   = config.MuteSound;
+        _pathUnmuteSound = config.UnmuteSound;
+
+        _lblIconMuted   = AddCompactFileRow("Muted icon",   () => _pathIconMuted,   v => _pathIconMuted   = v, "Icon files (*.ico)|*.ico",  col1X, y, cellW);
+        _lblIconActive  = AddCompactFileRow("Active icon",  () => _pathIconActive,  v => _pathIconActive  = v, "Icon files (*.ico)|*.ico",  col2X, y, cellW);
         y += 26;
-        (_edtMuteSound,   _lblMuteSound)   = AddCompactFileRow("Mute sound",   config.MuteSound,   "Sound files (*.wav)|*.wav",  col1X, y, cellW);
-        (_edtUnmuteSound, _lblUnmuteSound) = AddCompactFileRow("Unmute sound", config.UnmuteSound, "Sound files (*.wav)|*.wav",  col2X, y, cellW);
+        _lblMuteSound   = AddCompactFileRow("Mute sound",   () => _pathMuteSound,   v => _pathMuteSound   = v, "Sound files (*.wav)|*.wav", col1X, y, cellW);
+        _lblUnmuteSound = AddCompactFileRow("Unmute sound", () => _pathUnmuteSound, v => _pathUnmuteSound = v, "Sound files (*.wav)|*.wav", col2X, y, cellW);
         y += 26;
 
         // ── Buttons ──
@@ -375,7 +363,17 @@ internal sealed class SettingsDialog : Form
         if (_chkRunAtStartup.Checked && !File.Exists(startupPath))
             ShortcutHelper.CreateShortcut(startupPath, Environment.ProcessPath ?? "");
         else if (!_chkRunAtStartup.Checked && File.Exists(startupPath))
-            try { File.Delete(startupPath); } catch (Exception ex) { Log.Warn("Delete startup shortcut failed: " + ex.Message); }
+            try { File.Delete(startupPath); }
+            catch (Exception ex)
+            {
+                Log.Warn("Delete startup shortcut failed: " + ex.Message);
+                MessageBox.Show(this,
+                    "Couldn\u2019t remove the startup shortcut from your Startup folder.\n\n" +
+                    "MicMute will still start with Windows until the shortcut is removed manually.\n\n" +
+                    "Details: " + ex.Message,
+                    "MicMute \u2014 Startup shortcut",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
 
         // Hotkeys — captured inline in the Hotkeys section. Validate here
         // before committing so the user sees feedback before Apply closes.
@@ -383,12 +381,15 @@ internal sealed class SettingsDialog : Form
             return;
         _config.Hotkey = _capturedMainHK;
         _config.DeafenHotkey = _capturedDeafenHK;
+        if (_pendingAckedMainHk != null) _config.AckedMainHkConflict = _pendingAckedMainHk;
+        if (_pendingAckedDeafenHk != null) _config.AckedDeafenHkConflict = _pendingAckedDeafenHk;
 
-        // Custom files
-        _config.IconMuted = _edtIconMuted.Text.Trim();
-        _config.IconActive = _edtIconActive.Text.Trim();
-        _config.MuteSound = _edtMuteSound.Text.Trim();
-        _config.UnmuteSound = _edtUnmuteSound.Text.Trim();
+        // Custom files — paths are maintained as string fields by the
+        // AddCompactFileRow closures (no hidden TextBox phantom controls).
+        _config.IconMuted = (_pathIconMuted ?? "").Trim();
+        _config.IconActive = (_pathIconActive ?? "").Trim();
+        _config.MuteSound = (_pathMuteSound ?? "").Trim();
+        _config.UnmuteSound = (_pathUnmuteSound ?? "").Trim();
 
         bool saved = _config.Save();
         _onApply();
@@ -441,9 +442,13 @@ internal sealed class SettingsDialog : Form
 
         // Duplicate check — same combo on both hotkeys silently fights at
         // registration time (Windows grants it to whichever binds first).
+        // Compare by parsed (mods, vk) so that "^F1" and "ctrl+F1" are treated
+        // as the same binding even if the string representations differ.
         if (!string.IsNullOrEmpty(_capturedMainHK) &&
             !string.IsNullOrEmpty(_capturedDeafenHK) &&
-            string.Equals(_capturedMainHK, _capturedDeafenHK, StringComparison.OrdinalIgnoreCase))
+            Config.ParseHotkey(_capturedMainHK, out uint dupMM, out uint dupMV, allowBare: pttMode) &&
+            Config.ParseHotkey(_capturedDeafenHK, out uint dupDM, out uint dupDV, allowBare: false) &&
+            (dupMM & ~NativeMethods.MOD_NOREPEAT) == (dupDM & ~NativeMethods.MOD_NOREPEAT) && dupMV == dupDV)
         {
             MessageBox.Show(this,
                 "Toggle Mute and Deafen are both set to \"" + Config.HotkeyToReadable(_capturedMainHK) + "\".\n\n" +
@@ -453,38 +458,66 @@ internal sealed class SettingsDialog : Form
             return false;
         }
 
-        // Best-effort conflict probe — same pattern TrayApp uses. Caught LL-hook
-        // users we can't see, so this is a courtesy warning, not a hard block.
+        // Best-effort conflict probe using RegisterHotKey on this dialog's HWND.
+        // Limitation: apps that intercept keys via low-level keyboard hooks (e.g.
+        // Discord PTT, PowerToys) won't be detected — the probe will succeed even
+        // though those apps will still intercept the combo at runtime.
+        // This is therefore a courtesy warning, not a hard block.
         const int PROBE_ID_MAIN = 0x7A1D;
         const int PROBE_ID_DEAFEN = 0x7A1E;
         if (!string.IsNullOrEmpty(_capturedMainHK) &&
             Config.ParseHotkey(_capturedMainHK, out uint probeMMods, out uint probeMVk, allowBare: pttMode))
         {
-            bool ok = NativeMethods.RegisterHotKey(Handle, PROBE_ID_MAIN, probeMMods, probeMVk);
-            if (ok) NativeMethods.UnregisterHotKey(Handle, PROBE_ID_MAIN);
-            if (!ok)
+            bool ok = false;
+            try   { ok = NativeMethods.RegisterHotKey(Handle, PROBE_ID_MAIN, probeMMods, probeMVk); }
+            finally { if (ok) NativeMethods.UnregisterHotKey(Handle, PROBE_ID_MAIN); }
+            if (ok)
+            {
+                // Probe succeeded — clear any stale ack so a future real conflict re-warns.
+                _pendingAckedMainHk = "";
+            }
+            else if (_capturedMainHK.Equals(_config.AckedMainHkConflict, StringComparison.OrdinalIgnoreCase))
+            {
+                // User already confirmed "use it anyway" for this exact combo; stay silent.
+                _pendingAckedMainHk = _capturedMainHK;
+            }
+            else
             {
                 var res = MessageBox.Show(this,
-                    "Toggle Mute hotkey \"" + Config.HotkeyToReadable(_capturedMainHK) + "\" looks like it\u2019s already claimed by another app.\n\n" +
+                    "Toggle Mute hotkey \"" + Config.HotkeyToReadable(_capturedMainHK) + "\" appears to be claimed by another app " +
+                    "(detected via RegisterHotKey probe).\n\n" +
+                    "Note: apps using low-level keyboard hooks (e.g. Discord PTT, PowerToys) won\u2019t be detected by this probe.\n\n" +
                     "MicMute may lose the race, or both apps may fire at once. Use it anyway?",
                     "MicMute \u2014 Hotkey conflict",
                     MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
                 if (res != DialogResult.Yes) return false;
+                _pendingAckedMainHk = _capturedMainHK;
             }
         }
         if (!string.IsNullOrEmpty(_capturedDeafenHK) &&
             Config.ParseHotkey(_capturedDeafenHK, out uint probeDMods, out uint probeDVk, allowBare: false))
         {
-            bool ok = NativeMethods.RegisterHotKey(Handle, PROBE_ID_DEAFEN, probeDMods, probeDVk);
-            if (ok) NativeMethods.UnregisterHotKey(Handle, PROBE_ID_DEAFEN);
-            if (!ok)
+            bool ok = false;
+            try   { ok = NativeMethods.RegisterHotKey(Handle, PROBE_ID_DEAFEN, probeDMods, probeDVk); }
+            finally { if (ok) NativeMethods.UnregisterHotKey(Handle, PROBE_ID_DEAFEN); }
+            if (ok)
+            {
+                _pendingAckedDeafenHk = "";
+            }
+            else if (_capturedDeafenHK.Equals(_config.AckedDeafenHkConflict, StringComparison.OrdinalIgnoreCase))
+            {
+                _pendingAckedDeafenHk = _capturedDeafenHK;
+            }
+            else
             {
                 var res = MessageBox.Show(this,
-                    "Deafen Mute hotkey \"" + Config.HotkeyToReadable(_capturedDeafenHK) + "\" looks like it\u2019s already claimed by another app.\n\n" +
+                    "Deafen Mute hotkey \"" + Config.HotkeyToReadable(_capturedDeafenHK) + "\" appears to be claimed by another app.\n\n" +
+                    "Note: low-level keyboard hook apps won\u2019t be detected by this probe.\n\n" +
                     "Use it anyway?",
                     "MicMute \u2014 Hotkey conflict",
                     MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
                 if (res != DialogResult.Yes) return false;
+                _pendingAckedDeafenHk = _capturedDeafenHK;
             }
         }
 
@@ -507,13 +540,13 @@ internal sealed class SettingsDialog : Form
 
     private void AddSectionHeader(string text, int x, ref int y)
     {
-        var boldFont = new Font("Segoe UI", 9f, FontStyle.Bold);
+        var boldFont = new Font(UiTokens.PrimaryFont, UiTokens.SectionHeaderSize, FontStyle.Bold);
         _sectionFonts.Add(boldFont);
         var label = new Label
         {
             Text = text,
             Font = boldFont,
-            ForeColor = Color.FromArgb(0x44, 0x44, 0x44),
+            ForeColor = UiTokens.LabelColor,
             AutoSize = true,
             Location = new Point(x, y),
         };
@@ -548,14 +581,6 @@ internal sealed class SettingsDialog : Form
         return chk;
     }
 
-    /// <summary>
-    /// Compact cell for the Hotkeys 2-column grid. Cell layout:
-    ///   [label 78px] [display fills] [⋯ 28px] [× 20px — only if allowClear]
-    /// The [⋯] button opens HotkeyDialog (modal). The × button clears.
-    /// State lives outside the helper — getCaptured/setCaptured wire into the
-    /// dialog's _capturedMainHK / _capturedDeafenHK fields so ApplySettings
-    /// still has one source of truth.
-    /// </summary>
     /// <summary>
     /// Compact cell for the Hotkeys 2-column grid. Inline capture — clicking
     /// the display box enters "recording" mode (yellow background), pressing
@@ -610,9 +635,7 @@ internal sealed class SettingsDialog : Form
             bool empty = string.IsNullOrEmpty(v);
             string readable = empty ? "(not set)" : Config.HotkeyToReadable(v);
             display.Text = readable;
-            display.ForeColor = empty
-                ? UiTokens.GreyTextColor
-                : (captureMode ? Color.Black : Color.Black);
+            display.ForeColor = empty ? UiTokens.GreyTextColor : Color.Black;
             display.BackColor = captureMode ? UiTokens.FocusYellow : Color.White;
             btnClear.Enabled = !empty;
         }
@@ -658,8 +681,11 @@ internal sealed class SettingsDialog : Form
 
         display.KeyDown += (s, e) =>
         {
-            e.SuppressKeyPress = true;
+            // SuppressKeyPress only inside capture mode — outside capture,
+            // Escape, Enter, and Tab must fall through to the form's default
+            // handling (CancelButton, AcceptButton, and focus advancement).
             if (!captureMode) return;
+            e.SuppressKeyPress = true;
 
             // Escape cancels and restores the pre-capture value.
             if (e.KeyCode == Keys.Escape)
@@ -673,15 +699,41 @@ internal sealed class SettingsDialog : Form
                 ActiveControl = null;
                 return;
             }
-            // Tab — let WinForms handle focus move; Leave will commit.
-            if (e.KeyCode == Keys.Tab) return;
+            // Tab — suppress key press so the tab character isn't typed, but
+            // don't suppress the key itself so WinForms advances focus normally;
+            // Leave will commit the current capture value.
+            if (e.KeyCode == Keys.Tab)
+            {
+                e.SuppressKeyPress = false;
+                return;
+            }
 
             bool bare = bareKeysAllowed();
 
             // Bare modifier-only press (RCtrl alone, LShift alone, etc.)
             if (e.KeyCode is Keys.ControlKey or Keys.ShiftKey or Keys.Menu or Keys.LWin or Keys.RWin)
             {
-                if (!bare) return;
+                if (!bare)
+                {
+                    // Briefly tint the display red to signal that bare modifiers
+                    // aren't accepted outside Push-to-Talk mode.
+                    display.BackColor = UiTokens.ErrorTint;
+                    string prevText = display.Text;
+                    display.Text = "Bare modifiers need Push-to-Talk mode";
+                    var rejectTimer = new System.Windows.Forms.Timer { Interval = 1800 };
+                    rejectTimer.Tick += (_, _) =>
+                    {
+                        rejectTimer.Stop();
+                        rejectTimer.Dispose();
+                        if (!display.IsDisposed)
+                        {
+                            display.Text = prevText;
+                            display.BackColor = UiTokens.FocusYellow;
+                        }
+                    };
+                    rejectTimer.Start();
+                    return;
+                }
                 const int VK_RSHIFT = 0xA1, VK_RCONTROL = 0xA3, VK_RMENU = 0xA5;
                 string side = null;
                 if (e.KeyCode == Keys.ControlKey)
@@ -733,9 +785,14 @@ internal sealed class SettingsDialog : Form
     /// The display textbox is its own "browse" button — ReadOnly, cursor hand,
     /// click opens OpenFileDialog. This halves the section's vertical footprint
     /// vs. the previous "label + textbox + Browse + Clear" four-control row.
+    ///
+    /// Path state is owned by the caller via getPath/setPath callbacks — no
+    /// hidden phantom TextBox is parented to the form.
     /// </summary>
-    private (TextBox edit, TextBox display) AddCompactFileRow(
-        string labelText, string currentPath, string filter,
+    private TextBox AddCompactFileRow(
+        string labelText,
+        Func<string> getPath, Action<string> setPath,
+        string filter,
         int x, int y, int cellWidth)
     {
         const int labelWidth = 88;
@@ -745,7 +802,7 @@ internal sealed class SettingsDialog : Form
         int dispX = x + labelWidth + gap;
         int clearX = x + cellWidth - clearWidth;
         int dispW = clearX - dispX - gap;
-        bool hasFile = !string.IsNullOrEmpty(currentPath);
+        bool hasFile = !string.IsNullOrEmpty(getPath());
 
         var lbl = new Label
         {
@@ -753,25 +810,21 @@ internal sealed class SettingsDialog : Form
             Width = labelWidth,
             AutoSize = false,
             Location = new Point(x, y + 4),
-            ForeColor = Color.FromArgb(0x44, 0x44, 0x44),
+            ForeColor = UiTokens.LabelColor,
         };
         Controls.Add(lbl);
 
         var fileDisplay = new TextBox
         {
-            Text = FileLabel(currentPath),
+            Text = FileLabel(getPath()),
             ReadOnly = true,
             BackColor = Color.White,
             Cursor = Cursors.Hand,
-            ForeColor = hasFile ? Color.Black : Color.FromArgb(0x99, 0x99, 0x99),
+            ForeColor = hasFile ? Color.Black : UiTokens.GreyTextColor,
             Width = dispW,
             Location = new Point(dispX, y - 1),
         };
         Controls.Add(fileDisplay);
-
-        // Hidden field: stores the full path (display shows only the filename).
-        var edit = new TextBox { Text = currentPath, Visible = false, Width = 0, Location = new Point(0, 0) };
-        Controls.Add(edit);
 
         // Clear button — only meaningful when a file is set. Single glyph to
         // keep the column tight; tooltip carries the meaning for screen readers.
@@ -807,7 +860,7 @@ internal sealed class SettingsDialog : Form
                 if (res != DialogResult.OK) return;
             }
 
-            edit.Text = ofd.FileName;
+            setPath(ofd.FileName);
             fileDisplay.Text = FileLabel(ofd.FileName);
             fileDisplay.ForeColor = Color.Black;
             btnClear.Enabled = true;
@@ -827,13 +880,13 @@ internal sealed class SettingsDialog : Form
 
         btnClear.Click += (_, _) =>
         {
-            edit.Text = "";
+            setPath("");
             fileDisplay.Text = FileLabel("");
-            fileDisplay.ForeColor = Color.FromArgb(0x99, 0x99, 0x99);
+            fileDisplay.ForeColor = UiTokens.GreyTextColor;
             btnClear.Enabled = false;
         };
 
-        return (edit, fileDisplay);
+        return fileDisplay;
     }
 
     private static string FileLabel(string path)
@@ -999,6 +1052,14 @@ internal sealed class SettingsDialog : Form
     {
         if (disposing)
         {
+            // Defensively unregister probe IDs in case ValidateHotkeysBeforeApply
+            // threw between RegisterHotKey and UnregisterHotKey (A1-F04).
+            // These are no-ops if the IDs aren't registered; calling them is safe.
+            if (IsHandleCreated)
+            {
+                NativeMethods.UnregisterHotKey(Handle, 0x7A1D);
+                NativeMethods.UnregisterHotKey(Handle, 0x7A1E);
+            }
             _dialogFont?.Dispose();
             foreach (var f in _sectionFonts)
                 f.Dispose();

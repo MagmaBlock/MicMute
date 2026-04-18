@@ -10,7 +10,14 @@ internal sealed class HelpWindow : Form
 {
     private static HelpWindow s_instance = null!;
     private readonly RichTextBox _textBox;
-    private readonly List<Font> _fonts = new();
+
+    // A1-F07: static shared fonts — eliminates partial-ctor leak class entirely.
+    // Statics live for process lifetime; no per-instance tracking or Dispose needed.
+    // A5-F02: use UiTokens for font family and sizes where tokens exist.
+    //         HelpBodySize is not yet in UiTokens — using 9.75f inline until C6 adds it.
+    private static readonly Font s_titleFont  = new(UiTokens.PrimaryFont, UiTokens.HelpTitleSize, FontStyle.Bold);
+    private static readonly Font s_headerFont = new(UiTokens.SemiboldFont, UiTokens.HelpHeaderSize, FontStyle.Bold);
+    private static readonly Font s_bodyFont   = new(UiTokens.PrimaryFont, 9.75f);  // HelpBodySize pending C6
 
     private static readonly string s_helpText = @"MICMUTE — Global Microphone Mute Toggle
 
@@ -50,7 +57,7 @@ Middle-click toggle: When enabled, middle-clicking the tray icon swaps between T
 
 Run at startup: Creates a Windows startup shortcut so MicMute launches automatically when you log in.
 
-On startup: Controls what happens to your mic when MicMute starts:
+Mic mode On Startup: Controls what happens to your mic when MicMute starts:
   • Don't change — leaves your mic however it was.
   • Always muted — forces mic muted on launch.
   • Always unmuted — forces mic unmuted on launch.
@@ -58,9 +65,9 @@ On startup: Controls what happens to your mic when MicMute starts:
 
 ——— HOTKEYS —————————————————————
 
-Your main mute/unmute hotkey is set via the tray menu (right-click → ""Change Hotkey…""). The Settings window has a separate field for the Deafen hotkey.
+Set your Toggle Mute and Deafen hotkeys in the Settings window — click the field, press the combo.
 
-Both support Windows key combinations (like Win+Shift+D). Use AHK syntax:
+Both support Windows key combinations (like Win+Shift+D). The INI stores combos in shorthand:
   # = Win,  ^ = Ctrl,  ! = Alt,  + = Shift
   Example: #+d means Win+Shift+D
 
@@ -84,6 +91,12 @@ Right-click the tray icon → ""Mic Source"" to choose which microphone MicMute 
         ClientSize = new Size(540, 560);
         MinimumSize = new Size(440, 360);
         StartPosition = FormStartPosition.CenterScreen;
+        // A5-F12: AutoScaleMode.Dpi so the window responds correctly at 125/150/200 % scaling.
+        AutoScaleMode = AutoScaleMode.Dpi;
+
+        // A5-F12: named constants for margin / gap eliminate magic numbers.
+        const int margin = 18;
+        const int topGap = 14;
 
         _textBox = new RichTextBox
         {
@@ -94,8 +107,8 @@ Right-click the tray icon → ""Mic Source"" to choose which microphone MicMute 
             DetectUrls = false,
             WordWrap = true,
             TabStop = false,
-            Location = new Point(18, 14),
-            Size = new Size(ClientSize.Width - 36, ClientSize.Height - 28),
+            Location = new Point(margin, topGap),
+            Size = new Size(ClientSize.Width - 2 * margin, ClientSize.Height - topGap - margin),
             Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right,
         };
         Controls.Add(_textBox);
@@ -116,19 +129,10 @@ Right-click the tray icon → ""Mic Source"" to choose which microphone MicMute 
 
     private void RenderHelp()
     {
-        // Track each font immediately — if any ctor throws (OOM / GDI
-        // exhaustion), the already-constructed ones would otherwise leak
-        // their native handles until the GC finalizer eventually runs.
-        var titleFont = new Font("Segoe UI", 13.5f, FontStyle.Bold);
-        _fonts.Add(titleFont);
-        var headerFont = new Font("Segoe UI Semibold", 10.75f, FontStyle.Bold);
-        _fonts.Add(headerFont);
-        var bodyFont = new Font("Segoe UI", 9.75f);
-        _fonts.Add(bodyFont);
-
-        var titleColor = Color.FromArgb(0x11, 0x11, 0x11);
-        var headerColor = Color.FromArgb(0x22, 0x55, 0xAA);
-        var bodyColor = Color.FromArgb(0x1E, 0x1E, 0x1E);
+        // A5-F02: use UiTokens colors instead of inline Color.FromArgb literals.
+        var titleColor  = UiTokens.TitleColor;
+        var headerColor = UiTokens.HeaderColor;
+        var bodyColor   = UiTokens.BodyColor;
 
         _textBox.Clear();
 
@@ -141,7 +145,7 @@ Right-click the tray icon → ""Mic Source"" to choose which microphone MicMute 
             var text = body.ToString().TrimStart('\r', '\n');
             body.Clear();
             if (text.Length == 0) return;
-            _textBox.SelectionFont = bodyFont;
+            _textBox.SelectionFont = s_bodyFont;
             _textBox.SelectionColor = bodyColor;
             _textBox.AppendText(text);
         }
@@ -154,7 +158,7 @@ Right-click the tray icon → ""Mic Source"" to choose which microphone MicMute 
             if (!titleWritten)
             {
                 if (string.IsNullOrWhiteSpace(raw)) continue;
-                _textBox.SelectionFont = titleFont;
+                _textBox.SelectionFont = s_titleFont;
                 _textBox.SelectionColor = titleColor;
                 _textBox.AppendText(raw.Trim() + "\n\n");
                 titleWritten = true;
@@ -167,7 +171,7 @@ Right-click the tray icon → ""Mic Source"" to choose which microphone MicMute 
                 var title = raw.Trim().Trim('\u2014', '-', ' ');
                 if (title.Length == 0) continue;
                 _textBox.AppendText("\n");
-                _textBox.SelectionFont = headerFont;
+                _textBox.SelectionFont = s_headerFont;
                 _textBox.SelectionColor = headerColor;
                 _textBox.AppendText(title + "\n\n");
                 continue;
@@ -181,13 +185,10 @@ Right-click the tray icon → ""Mic Source"" to choose which microphone MicMute 
         _textBox.SelectionLength = 0;
     }
 
+    // A1-F07: no per-instance font Dispose — statics live for process lifetime.
+    // base.Dispose handles the RichTextBox and other managed controls.
     protected override void Dispose(bool disposing)
     {
-        if (disposing)
-        {
-            foreach (var f in _fonts) f.Dispose();
-            _fonts.Clear();
-        }
         base.Dispose(disposing);
     }
 

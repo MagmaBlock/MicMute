@@ -11,8 +11,18 @@ internal static class Log
     private static readonly object _gate = new();
     private static readonly string _logPath = GetLogPath();
 
+    // A3-F02: track primary-log failure so we can funnel to emergency log once broken.
+    private static bool _logBroken;
+    private static readonly string _emergencyLogPath =
+        Path.Combine(Path.GetTempPath(), "micmute-emergency.log");
+
     private static string GetLogPath()
     {
+        // A3-F03: three-tier fallback — %LOCALAPPDATA%\MicMute → %TEMP%\MicMute → exe dir.
+        // Returns "" only if all three fail, which silences logging gracefully.
+        string lastError = null;
+
+        // Tier 1: preferred location
         try
         {
             var dir = Path.Combine(
@@ -21,12 +31,45 @@ internal static class Log
             Directory.CreateDirectory(dir);
             return Path.Combine(dir, "micmute.log");
         }
-        catch
+        catch (Exception ex) { lastError = ex.Message; }
+
+        // Tier 2: %TEMP%\MicMute
+        try
         {
-            // If AppData is unavailable we'll fall back to swallowing — logging must
-            // never throw on the caller's thread.
-            return "";
+            var dir = Path.Combine(Path.GetTempPath(), "MicMute");
+            Directory.CreateDirectory(dir);
+            var path = Path.Combine(dir, "micmute.log");
+            // One-shot marker so the user (or support) knows the primary path failed.
+            try
+            {
+                File.AppendAllText(path,
+                    $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [WARN] Log path fell back to {path} due to: {lastError}{Environment.NewLine}");
+            }
+            catch { }
+            return path;
         }
+        catch (Exception ex) { lastError = ex.Message; }
+
+        // Tier 3: exe directory
+        try
+        {
+            var dir = Path.GetDirectoryName(Environment.ProcessPath ?? "") ?? "";
+            if (!string.IsNullOrEmpty(dir))
+            {
+                var path = Path.Combine(dir, "micmute.log");
+                try
+                {
+                    File.AppendAllText(path,
+                        $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [WARN] Log path fell back to {path} due to: {lastError}{Environment.NewLine}");
+                }
+                catch { }
+                return path;
+            }
+        }
+        catch { }
+
+        // All tiers failed — caller will bail early on empty string.
+        return "";
     }
 
     public static void Info(string msg) => Write("INFO", msg, null);
@@ -37,20 +80,39 @@ internal static class Log
     private static void Write(string level, string msg, Exception ex)
     {
         if (string.IsNullOrEmpty(_logPath)) return;
+
+        var line = ex == null
+            ? $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [{level}] {msg}{Environment.NewLine}"
+            : $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [{level}] {msg} -- {ex.GetType().Name}: {ex.Message}{Environment.NewLine}{ex.StackTrace}{Environment.NewLine}";
+
         try
         {
             lock (_gate)
             {
                 RotateIfNeeded();
-                var line = ex == null
-                    ? $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [{level}] {msg}{Environment.NewLine}"
-                    : $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [{level}] {msg} -- {ex.GetType().Name}: {ex.Message}{Environment.NewLine}{ex.StackTrace}{Environment.NewLine}";
                 File.AppendAllText(_logPath, line);
             }
         }
-        catch
+        catch (Exception writeEx)
         {
-            // Logging failures are always swallowed — we never want to mask the real problem.
+            // A3-F02: on first failure flip the broken flag and funnel to emergency log.
+            // Subsequent failures also route there. Never show a MessageBox from here —
+            // Write can be called from any thread.
+            if (!_logBroken)
+            {
+                _logBroken = true;
+                try
+                {
+                    File.AppendAllText(_emergencyLogPath,
+                        $"{DateTime.Now:O} Primary log failed: {writeEx.Message}{Environment.NewLine}{line}");
+                }
+                catch { }
+            }
+            else
+            {
+                try { File.AppendAllText(_emergencyLogPath, line); }
+                catch { }
+            }
         }
     }
 

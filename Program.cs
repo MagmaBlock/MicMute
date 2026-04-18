@@ -13,33 +13,33 @@ internal static class Program
         bool isAfterUpdate = args.Contains("--after-update");
 
         // Back-compat handoff from v2.1.5 (which used Global\MicMute_SingleInstance).
-        // If a v2.1.5 instance is still winding down during upgrade, wait briefly
-        // for it to exit so we don't dual-run with two tray icons + fighting
-        // hotkey registrations. A v2.1.6+ instance never acquires Global\, so on
-        // steady-state this is either a fast miss (acquire + release) or a
-        // meaningful wait during the self-update handoff. Can be removed once
-        // all users have upgraded past 2.1.5.
-        try
+        // Only relevant during --after-update: the old instance is winding down and
+        // we need to wait for it to release the legacy mutex before proceeding.
+        // Normal cold-start no longer pays the 250 ms probe — v2.1.5 is 4 minors old.
+        if (isAfterUpdate)
         {
-            using var legacyMutex = new Mutex(false, @"Global\MicMute_SingleInstance");
-            bool legacyHeld;
             try
             {
-                legacyHeld = legacyMutex.WaitOne(isAfterUpdate ? 5000 : 250, false);
+                using var legacyMutex = new Mutex(false, @"Global\MicMute_SingleInstance");
+                bool legacyHeld;
+                try
+                {
+                    legacyHeld = legacyMutex.WaitOne(5000, false);
+                }
+                catch (AbandonedMutexException)
+                {
+                    // v2.1.5 crashed without cleanup — we now own the mutex
+                    // and must release it below so v2.1.5-era shimmers don't
+                    // see it as still-abandoned on a subsequent wait.
+                    legacyHeld = true;
+                }
+                if (legacyHeld)
+                    legacyMutex.ReleaseMutex();
             }
-            catch (AbandonedMutexException)
+            catch (Exception ex)
             {
-                // v2.1.5 crashed without cleanup — we now own the mutex
-                // and must release it below so v2.1.5-era shimmers don't
-                // see it as still-abandoned on a subsequent wait.
-                legacyHeld = true;
+                Log.Warn("Legacy mutex check failed (non-fatal): " + ex.Message);
             }
-            if (legacyHeld)
-                legacyMutex.ReleaseMutex();
-        }
-        catch (Exception ex)
-        {
-            Log.Warn("Legacy mutex check failed (non-fatal): " + ex.Message);
         }
 
         // Single-instance: acquire ownership explicitly via WaitOne so a duplicate
@@ -61,7 +61,10 @@ internal static class Program
             acquired = true;
         }
         if (!acquired)
+        {
+            Log.Info($"MicMute launch: another instance already running (isAfterUpdate={isAfterUpdate}), exiting.");
             return;
+        }
 
         Log.Info($"MicMute starting (afterUpdate={isAfterUpdate})");
 
@@ -71,7 +74,7 @@ internal static class Program
         }
         finally
         {
-            try { mutex.ReleaseMutex(); } catch { }
+            try { mutex.ReleaseMutex(); } catch (Exception ex) { Log.Warn("ReleaseMutex on exit: " + ex.Message); }
             Log.Info("MicMute exiting");
         }
     }
@@ -81,6 +84,7 @@ internal static class Program
         UpdateDialog.CleanupUpdateArtifacts();
         ShortcutHelper.ValidateStartupShortcut();
 
+        Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
 
