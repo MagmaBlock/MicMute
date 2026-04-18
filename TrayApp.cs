@@ -414,6 +414,11 @@ internal sealed class TrayApp : Form
                     bool? m = _audio.GetMute();
                     _muted = m ?? false;
                     SyncTrayIcon();
+                    // Re-arm the hotkey. Without this the polling path
+                    // (which bails when HasEndpoint went false) never restarts,
+                    // silently leaving the user with no hotkey until they
+                    // mode-switch or relaunch.
+                    RegisterMainHotkey();
                 }
                 return;
             }
@@ -504,21 +509,17 @@ internal sealed class TrayApp : Form
     {
         UnregisterMainHotkey();
 
-        // Only the polling path can safely handle bare keys (letters, digits,
-        // etc.). RegisterHotKey would hijack them globally — keep the strict
-        // gate for that path.
-        bool universalPath = _config.Mode == "push-to-talk" && _config.LowLatencyPtt;
-        if (!Config.ParseHotkey(_config.Hotkey, out uint mods, out uint vk, allowBare: universalPath))
+        // PTT mode takes the polling path unconditionally — fullscreen-safe,
+        // accepts bare modifier keys, no anti-cheat signature. Toggle mode
+        // uses RegisterHotKey (event-driven, zero idle cost).
+        bool pttMode = _config.Mode == "push-to-talk";
+        if (!Config.ParseHotkey(_config.Hotkey, out uint mods, out uint vk, allowBare: pttMode))
         {
             ShowTimedTooltip("Invalid hotkey: " + _config.Hotkey + "\nFalling back to tray-only mode.", 5000);
             return;
         }
 
-        // Low-latency PTT path: passive GetAsyncKeyState polling instead of
-        // RegisterHotKey. No hook, so no anti-cheat signature. Works over
-        // fullscreen games and accepts bare modifier keys (RCtrl alone, etc.)
-        // that RegisterHotKey wouldn't accept.
-        if (universalPath)
+        if (pttMode)
         {
             StartUniversalPttPoll(vk, mods & ~NativeMethods.MOD_NOREPEAT);
             return;
@@ -538,21 +539,9 @@ internal sealed class TrayApp : Form
             _mainHotkeyRegistered = false;
         }
 
+        // StopUniversalPttPoll handles the safety re-mute if the user was
+        // holding PTT during a rebind / mode switch — don't duplicate here.
         StopUniversalPttPoll();
-
-        // If PTT was actively polling (user holding the old hotkey), the key's
-        // release event will never arrive — it's bound to a different VK now,
-        // or no VK at all. Stop the poll AND re-mute so the mic doesn't stay
-        // open. Covers both hotkey rebind and mode-switch while held.
-        // Skipped during shutdown — ExitApplication owns mic state on exit
-        // (F-10: unmute so user isn't stuck muted in Discord/Zoom).
-        bool wasPolling = _pttTimer?.Enabled == true;
-        _pttTimer?.Stop();
-        if (!_shuttingDown && wasPolling && _audio.HasEndpoint && !_muted)
-        {
-            if (!SetMuteState(true, true))
-                Log.Warn("PTT safety re-mute failed during hotkey unregister — mic may still be hot");
-        }
     }
 
     private void RegisterDeafenHotkey()
@@ -592,9 +581,11 @@ internal sealed class TrayApp : Form
             int id = m.WParam.ToInt32();
             if (id == HOTKEY_ID_MAIN)
             {
-                if (_config.Mode == "push-to-talk")
-                    HandlePushToTalk();
-                else
+                // WM_HOTKEY only fires in Toggle mode now — PTT always runs
+                // through the polling path. The mode guard defends against a
+                // mode-switch race where a WM_HOTKEY is already queued when
+                // we flip to PTT.
+                if (_config.Mode != "push-to-talk")
                     ToggleMute();
             }
             else if (id == HOTKEY_ID_DEAFEN)
@@ -612,84 +603,25 @@ internal sealed class TrayApp : Form
         base.WndProc(ref m);
     }
 
-    // ── Push-to-Talk ─────────────────────────────────────────────────────
-    // Win32 RegisterHotKey doesn't directly support key-up events.
-    // On WM_HOTKEY, unmute and poll for key release via a timer, then re-mute.
-
-    private System.Windows.Forms.Timer _pttTimer;
-    private uint _pttVk;
-
-    private void HandlePushToTalk()
-    {
-        // PTT press MUST unmute — if it silently fails, the user speaks into
-        // a dead mic and nobody hears them. Surface it immediately rather
-        // than falling into the poll and pretending everything's fine.
-        if (!SetMuteState(false, true))
-        {
-            Log.Error("PTT unmute failed — mic still muted while key held");
-            ShowTimedTooltip(
-                "Couldn't unmute microphone.\nTry Tray \u2192 Reinit Mic.", 4000);
-            return;
-        }
-
-        // Cache the VK for polling (avoids re-parsing on every timer tick)
-        if (!Config.ParseHotkey(_config.Hotkey, out _, out uint vk))
-            return;
-        _pttVk = vk;
-
-        // Start polling for key release
-        if (_pttTimer == null)
-        {
-            _pttTimer = new System.Windows.Forms.Timer { Interval = 30 };
-            _pttTimer.Tick += OnPttPoll;
-        }
-        _pttTimer.Start();
-    }
-
-    private void OnPttPoll(object sender, EventArgs e)
-    {
-        try
-        {
-            // Check if the key is still held
-            short state = NativeMethods.GetAsyncKeyState((int)_pttVk);
-            bool held = (state & 0x8000) != 0;
-            if (!held)
-            {
-                _pttTimer.Stop();
-                if (_config.Mode == "push-to-talk") // guard against mode switch while held
-                {
-                    // Re-mute on key release MUST succeed — silent failure
-                    // leaves a hot mic open after the user thinks PTT ended.
-                    // Flash the tray and surface a tooltip even in quiet mode
-                    // because this is the "mic still live after PTT" bug.
-                    if (!SetMuteState(true, true))
-                    {
-                        Log.Error("PTT re-mute on key release failed — mic may still be hot");
-                        FlashIcon();
-                        ShowTimedTooltip(
-                            "Couldn't re-mute microphone after PTT.\n" +
-                            "Mic may still be open \u2014 verify in Windows.", 4000);
-                    }
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            Log.Error("OnPttPoll", ex);
-            _pttTimer?.Stop();
-        }
-    }
-
-    // ── Low-latency / Universal PTT (polling, no keyboard hook) ──────────
-    // Continuous GetAsyncKeyState sampling replaces RegisterHotKey when
-    // LowLatencyPtt is enabled. 30 Hz is imperceptible for PTT press timing
-    // (human reaction time ~200 ms) and CPU cost is a couple of syscalls per
-    // tick. No hook = no anti-cheat signature = no risk of collateral bans.
+    // ── Push-to-Talk (polling path) ──────────────────────────────────────
+    // PTT mode always uses continuous GetAsyncKeyState polling — no
+    // RegisterHotKey, no keyboard hook. 30 Hz is imperceptible for press
+    // timing (human reaction ~200 ms) and CPU cost is a couple of syscalls
+    // per tick. No hook = no anti-cheat signature = no risk of collateral
+    // bans. Works over fullscreen-exclusive games and accepts bare modifier
+    // keys (RCtrl alone, etc.) the way Discord does PTT.
 
     private System.Windows.Forms.Timer _pttUniversalTimer;
     private bool _pttUniversalDown;
     private uint _pttUniversalVk;
     private uint _pttUniversalMods;
+
+    // Sticky PTT override: user left-clicked the tray while in PTT mode.
+    // Polling is paused, mic is unmuted, a persistent OSD stays up until the
+    // user left-clicks again (or changes mode, or exits). Lets the user hold
+    // the mic open during a long conversation without rubber-banding on the
+    // hotkey. See ToggleStickyPttOverride.
+    private bool _pttStickyUnmuted;
 
     private void StartUniversalPttPoll(uint vk, uint mods)
     {
@@ -772,7 +704,7 @@ internal sealed class TrayApp : Form
         catch (Exception ex)
         {
             // Stop on exception — otherwise a steady-state fault spams the log
-            // every 30 ms. Classic _pttTimer path does the same (OnPttPoll).
+            // every 30 ms on steady-state faults.
             Log.Error("OnUniversalPttPoll", ex);
             _pttUniversalTimer?.Stop();
 
@@ -894,6 +826,11 @@ internal sealed class TrayApp : Form
 
     private void SetMode(string newMode)
     {
+        // Any mode change invalidates sticky PTT — the override only makes
+        // sense inside PTT mode. Clear it before the mode flips so the
+        // persistent OSD doesn't linger under toggle-mode state.
+        ClearStickyPttOverride();
+
         _config.Mode = newMode;
         if (newMode == "push-to-talk")
         {
@@ -930,23 +867,29 @@ internal sealed class TrayApp : Form
         _menuTitleFont?.Dispose();
         _menuTitleFont = new Font(_trayMenu.Font, FontStyle.Bold);
 
-        // Title / toggle
-        var titleItem = new ToolStripMenuItem("Toggle Mute \u2014 v" + Config.Version);
-        titleItem.Font = _menuTitleFont;
-        titleItem.Click += (_, _) => ToggleMute();
+        // Title — program name + version. Still clickable so it matches the
+        // tray left-click (toggle in Toggle mode, sticky-PTT in PTT mode),
+        // but the label no longer implies "toggle" since that wording was
+        // misleading in PTT mode.
+        var titleItem = new ToolStripMenuItem("MicMute v" + Config.Version)
+        {
+            Font = _menuTitleFont,
+            TextAlign = ContentAlignment.MiddleCenter,
+        };
+        titleItem.Click += (_, _) => HandleUserToggleClick();
         _trayMenu.Items.Add(titleItem);
         _trayMenu.Items.Add(new ToolStripSeparator());
 
-        // Hotkey — render the key combo as a right-aligned shortcut display
-        // (Windows-native pattern) instead of stretching the label itself.
-        // When no hotkey is bound, pass an empty string so WinForms draws the
-        // left label only (rather than "(none)" looking like a real shortcut).
-        var hotkeyItem = new ToolStripMenuItem("Change Hotkey\u2026")
-        {
-            ShortcutKeyDisplayString = string.IsNullOrEmpty(_config.Hotkey) ? "" : hotkeyReadable,
-        };
-        hotkeyItem.Click += (_, _) => ShowHotkeyDialog();
+        // Hotkey — the combo is the label. Click opens Settings (inline
+        // capture lives in the Hotkeys section there). Bold font + bracketing
+        // separators mark it as a reference line, not an ordinary action.
+        string hotkeyDisplay = string.IsNullOrEmpty(_config.Hotkey)
+            ? "(no hotkey bound \u2014 click to set)"
+            : hotkeyReadable;
+        var hotkeyItem = new ToolStripMenuItem(hotkeyDisplay) { Font = _menuTitleFont };
+        hotkeyItem.Click += (_, _) => ShowSettingsDialog();
         _trayMenu.Items.Add(hotkeyItem);
+        _trayMenu.Items.Add(new ToolStripSeparator());
 
         // Mode submenu
         string modeLabel = "Mode: " + (_config.Mode == "push-to-talk" ? "Push-to-Talk" : "Toggle");
@@ -971,13 +914,6 @@ internal sealed class TrayApp : Form
 
         _trayMenu.Items.Add(new ToolStripSeparator());
 
-        // Settings
-        var settingsItem = new ToolStripMenuItem("Settings\u2026");
-        settingsItem.Click += (_, _) => ShowSettingsDialog();
-        _trayMenu.Items.Add(settingsItem);
-
-        _trayMenu.Items.Add(new ToolStripSeparator());
-
         // Reinit
         var reinitItem = new ToolStripMenuItem("Reinit Mic");
         reinitItem.Click += (_, _) => ReinitMic();
@@ -994,6 +930,14 @@ internal sealed class TrayApp : Form
             });
         };
         _trayMenu.Items.Add(soundItem);
+
+        _trayMenu.Items.Add(new ToolStripSeparator());
+
+        // Settings — bracketed by separators so it sits in its own section
+        // right above Exit, away from the action items.
+        var settingsItem = new ToolStripMenuItem("Settings\u2026");
+        settingsItem.Click += (_, _) => ShowSettingsDialog();
+        _trayMenu.Items.Add(settingsItem);
 
         _trayMenu.Items.Add(new ToolStripSeparator());
 
@@ -1122,7 +1066,14 @@ internal sealed class TrayApp : Form
                 target = _config.LastMuteState;
                 break;
             default:
-                targetKnown = false;
+                // PTT mode implies mic-off-until-held. Without an explicit
+                // StartMuted preference, a hot mic at launch means the first
+                // PTT press is an invisible no-op (SetMuteState short-circuits
+                // on already-unmuted). Force-mute so PTT behaves from frame 1.
+                if (_config.Mode == "push-to-talk" && !_muted)
+                    target = true;
+                else
+                    targetKnown = false;
                 break;
         }
 
@@ -1137,77 +1088,9 @@ internal sealed class TrayApp : Form
 
     // ── Dialogs ──────────────────────────────────────────────────────────
 
-    private void ShowHotkeyDialog()
-    {
-        bool bareKeysAllowed = _config.Mode == "push-to-talk" && _config.LowLatencyPtt;
-        using var dlg = new HotkeyDialog(_config.Hotkey, bareKeysAllowed);
-        if (dlg.ShowDialog() != DialogResult.OK || string.IsNullOrEmpty(dlg.ResultHotkey))
-            return;
-
-        // Bare keys are only safe on the polling path — allow them in validation
-        // only when the user has low-latency PTT enabled for PTT mode.
-        bool allowBare = _config.Mode == "push-to-talk" && _config.LowLatencyPtt;
-
-        // Validate before replacing so a bad pick (e.g. a key VK_OEM doesn't map)
-        // doesn't leave the user in tray-only mode with their hotkey gone.
-        if (!Config.ParseHotkey(dlg.ResultHotkey, out uint mods, out uint vk, allowBare))
-        {
-            // Specific guidance for the "bare key refused because LowLatencyPtt
-            // is on but Mode isn't PTT" trap. Re-parse with allowBare=true
-            // just to detect the shape of the user's intent.
-            bool wouldParseAsBare = _config.LowLatencyPtt && _config.Mode != "push-to-talk"
-                && Config.ParseHotkey(dlg.ResultHotkey, out _, out _, allowBare: true);
-            if (wouldParseAsBare)
-            {
-                ShowTimedTooltip("Bare keys like \"" + dlg.ResultHotkey + "\" only work in Push-to-Talk mode.\n" +
-                    "Switch Mode to Push-to-Talk first, then rebind.", 6000);
-            }
-            else
-            {
-                ShowTimedTooltip("That key combination can't be used as a hotkey.\nKeeping previous: " +
-                    Config.HotkeyToReadable(_config.Hotkey), 5000);
-            }
-            return;
-        }
-
-        // Risk warning for low-latency PTT bindings that would fire during
-        // ordinary typing (bare letters/digits/Space, routine Ctrl-shortcuts).
-        // Always-safe bindings — L/R modifiers, function keys, Win-combos —
-        // skip this dialog.
-        if (allowBare && Config.IsRiskyHotkey(mods, vk))
-        {
-            var confirm = MessageBox.Show(
-                "\"" + Config.HotkeyToReadable(dlg.ResultHotkey) + "\" is a key you'll press during normal use.\n\n" +
-                "With low-latency PTT on, your mic will open every time you press it \u2014 in every app, " +
-                "not just voice chat. Use it anyway?",
-                "MicMute \u2014 Risky PTT key",
-                MessageBoxButtons.YesNo,
-                MessageBoxIcon.Warning,
-                MessageBoxDefaultButton.Button2);
-            if (confirm != DialogResult.Yes)
-                return;
-        }
-
-        string previousHotkey = _config.Hotkey;
-        _config.Hotkey = dlg.ResultHotkey;
-        RegisterMainHotkey();
-
-        // If the OS refused the bind (RegisterHotKey path only — another app
-        // owns the combo), revert. The polling path never fails this way.
-        bool pollingPath = _config.Mode == "push-to-talk" && _config.LowLatencyPtt;
-        if (!pollingPath && !_mainHotkeyRegistered)
-        {
-            _config.Hotkey = previousHotkey;
-            RegisterMainHotkey();
-            return;
-        }
-
-        BuildTrayMenu();
-        if (_config.Save())
-            ShowTimedTooltip("Hotkey changed to: " + Config.HotkeyToReadable(_config.Hotkey), 3000);
-        else
-            ShowTimedTooltip("Hotkey changed, but settings couldn't be saved.\nIt will revert to the old hotkey on next launch.", 5000);
-    }
+    // Tray-menu "change hotkey" click routes straight into the Settings
+    // dialog's Hotkeys section — inline capture lives there. No separate
+    // HotkeyDialog window as of v2.1.9.
 
     private void ShowSettingsDialog()
     {
@@ -1225,6 +1108,10 @@ internal sealed class TrayApp : Form
 
     private void OnSettingsApplied()
     {
+        // Any Apply path that touches hotkey config invalidates sticky PTT —
+        // RegisterMainHotkey below will restart polling from a clean state.
+        ClearStickyPttOverride();
+
         // Load new icons first, then swap and dispose old ones
         var oldActive = _iconActive;
         var oldMuted = _iconMuted;
@@ -1238,11 +1125,9 @@ internal sealed class TrayApp : Form
         oldActive?.Dispose();
         oldMuted?.Dispose();
 
-        // Re-register hotkeys. Main hotkey needs re-registration too because
-        // toggling LowLatencyPtt switches between the RegisterHotKey path and
-        // the polling path. If the user was holding PTT during Apply, the
-        // classic RegisterHotKey path has no release event waiting for us —
-        // defensively re-mute before re-registering so the mic can't stay hot.
+        // Defensive re-mute if the user was holding PTT during Apply — the
+        // new hotkey registration has no release event waiting for us, so
+        // guarantee the mic isn't hot across the rebind.
         if (_config.Mode == "push-to-talk" && _audio.HasEndpoint && !_muted)
         {
             if (!SetMuteState(true, true))
@@ -1263,12 +1148,84 @@ internal sealed class TrayApp : Form
     {
         if (e.Button == MouseButtons.Left)
         {
-            ToggleMute();
+            HandleUserToggleClick();
         }
         else if (e.Button == MouseButtons.Middle && _config.MiddleClickToggle)
         {
             SetMode(_config.Mode == "toggle" ? "push-to-talk" : "toggle");
         }
+    }
+
+    /// <summary>
+    /// Unified entry point for left-click on the tray icon AND the
+    /// "Toggle Mute" menu title item. In toggle mode it's a plain flip;
+    /// in PTT mode it toggles the sticky override so the user can hold
+    /// the mic open without holding the hotkey.
+    /// </summary>
+    private void HandleUserToggleClick()
+    {
+        if (_config.Mode == "push-to-talk")
+            ToggleStickyPttOverride();
+        else
+            ToggleMute();
+    }
+
+    /// <summary>
+    /// Sticky PTT: in PTT mode, left-clicking the tray unmutes the mic and
+    /// pauses the polling hotkey until the next left-click. A persistent OSD
+    /// stays up the whole time so the user can't forget the mic is live.
+    /// Exiting the mode (or the app) clears the override and re-mutes.
+    /// </summary>
+    private void ToggleStickyPttOverride()
+    {
+        if (!_audio.HasEndpoint)
+        {
+            ShowTimedTooltip("No microphone available.\nTry Tray \u2192 Reinitialise Mic.", 5000);
+            return;
+        }
+
+        if (_pttStickyUnmuted)
+        {
+            // Exit sticky — re-mute and re-arm polling so PTT works again.
+            _pttStickyUnmuted = false;
+            _osdForm.HidePersistent();
+            if (!SetMuteState(true, true))
+                Log.Warn("Sticky-PTT exit re-mute failed — mic may still be hot");
+            RegisterMainHotkey();
+            ShowTimedTooltip("Push-to-Talk \u2014 hold your hotkey to talk.", 2000);
+        }
+        else
+        {
+            // Enter sticky — stop polling first so a PTT release edge while
+            // the user is walking their hand to the mouse doesn't race us
+            // back to muted. The stop path's own safety re-mute only fires
+            // if the PTT key is currently down, which it won't be here.
+            StopUniversalPttPoll();
+            if (!SetMuteState(false, true))
+            {
+                // Unmute failed — don't enter sticky state, and restart
+                // polling so the user isn't stranded without a hotkey.
+                Log.Error("Sticky-PTT unmute failed — aborting, re-arming hotkey");
+                RegisterMainHotkey();
+                ShowTimedTooltip("Couldn't unmute microphone.\nTry Tray \u2192 Reinitialise Mic.", 4000);
+                return;
+            }
+            _pttStickyUnmuted = true;
+            _osdForm.ShowPersistent("PTT \u2014 mic listening", isMuted: false);
+        }
+    }
+
+    /// <summary>
+    /// Clear any active sticky-PTT state. Called from SetMode (mode change),
+    /// ExitApplication, and OnSettingsApplied when a setting change would
+    /// invalidate the sticky pretense (hotkey rebind, LL-PTT toggle). Does
+    /// NOT re-mute — caller owns the follow-on mic state.
+    /// </summary>
+    private void ClearStickyPttOverride()
+    {
+        if (!_pttStickyUnmuted) return;
+        _pttStickyUnmuted = false;
+        _osdForm.HidePersistent();
     }
 
     // ── Timed Notification ────────────────────────────────────────────────
@@ -1289,6 +1246,10 @@ internal sealed class TrayApp : Form
         // Claim ownership of exit-time mute state before Dispose chain runs.
         // UnregisterMainHotkey skips its PTT re-mute safety net when this is set.
         _shuttingDown = true;
+
+        // Hide the sticky-PTT persistent OSD so it doesn't linger visually
+        // past Application.Exit while Dispose tears the form down.
+        ClearStickyPttOverride();
 
         // Unmute on exit (F-10) + restore speakers if deafened (F-20)
         if (_deafened)
@@ -1321,13 +1282,6 @@ internal sealed class TrayApp : Form
 
             _flashTimer.Stop();
             _flashTimer.Dispose();
-
-            if (_pttTimer != null)
-            {
-                _pttTimer.Stop();
-                _pttTimer.Dispose();
-                _pttTimer = null;
-            }
 
             if (_pttUniversalTimer != null)
             {

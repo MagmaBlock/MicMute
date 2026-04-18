@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Windows.Forms;
 
 namespace MicMute;
 
@@ -32,7 +33,6 @@ internal sealed class Config
     // (LCtrl / RCtrl / RShift / etc.). No keyboard hook is installed — the
     // key state is read passively the same way games themselves read it,
     // so there's no anti-cheat signature.
-    public bool LowLatencyPtt;
 
     private readonly string _iniPath;
 
@@ -116,7 +116,6 @@ internal sealed class Config
         if (StartMuted != "no" && StartMuted != "yes" && StartMuted != "unmuted" && StartMuted != "last")
             StartMuted = "no";
         LastMuteState = ReadIni("LastMuteState", "0") == "1";
-        LowLatencyPtt = ReadIni("LowLatencyPtt", "0") == "1";
 
         // Persist any v2.1.5 → v2.1.6 bare-hotkey migrations so the next
         // launch reads the already-valid value (and so the user's "change
@@ -179,7 +178,6 @@ internal sealed class Config
         sb.AppendLine("MiddleClickToggle=" + (MiddleClickToggle ? "1" : "0"));
         sb.AppendLine("StartMuted=" + StartMuted);
         sb.AppendLine("LastMuteState=" + (LastMuteState ? "1" : "0"));
-        sb.AppendLine("LowLatencyPtt=" + (LowLatencyPtt ? "1" : "0"));
 
         return WriteAtomic(sb.ToString());
     }
@@ -256,6 +254,65 @@ internal sealed class Config
     public static string ExtractKeyName(string hk)
     {
         return s_stripModifiers.Replace(hk, "");
+    }
+
+    /// <summary>
+    /// Maps a WinForms <see cref="Keys"/> value to the AHK-style key name
+    /// used in our INI format. Returns empty string for keys we don't
+    /// bind (media keys, browser keys, etc.). Used by the inline hotkey
+    /// capture path in <see cref="SettingsDialog"/>.
+    /// </summary>
+    public static string KeyCodeToName(Keys key)
+    {
+        if (key is >= Keys.A and <= Keys.Z)
+            return ((char)key).ToString().ToLowerInvariant();
+        if (key is >= Keys.D0 and <= Keys.D9)
+            return ((char)('0' + (key - Keys.D0))).ToString();
+        if (key is >= Keys.F1 and <= Keys.F24)
+            return "F" + (key - Keys.F1 + 1);
+        if (key is >= Keys.NumPad0 and <= Keys.NumPad9)
+            return "Numpad" + (key - Keys.NumPad0);
+
+        return key switch
+        {
+            Keys.Space => "Space",
+            Keys.Enter or Keys.Return => "Enter",
+            Keys.Tab => "Tab",
+            Keys.Escape => "Escape",
+            Keys.Back => "Backspace",
+            Keys.Delete => "Delete",
+            Keys.Insert => "Insert",
+            Keys.Home => "Home",
+            Keys.End => "End",
+            Keys.PageUp => "PgUp",
+            Keys.PageDown => "PgDn",
+            Keys.Up => "Up",
+            Keys.Down => "Down",
+            Keys.Left => "Left",
+            Keys.Right => "Right",
+            Keys.CapsLock => "CapsLock",
+            Keys.NumLock => "NumLock",
+            Keys.Scroll => "ScrollLock",
+            Keys.PrintScreen => "PrintScreen",
+            Keys.Pause => "Pause",
+            Keys.Add => "NumpadAdd",
+            Keys.Subtract => "NumpadSub",
+            Keys.Multiply => "NumpadMult",
+            Keys.Divide => "NumpadDiv",
+            Keys.Decimal => "NumpadDot",
+            Keys.OemPeriod => ".",
+            Keys.Oemcomma => ",",
+            Keys.OemSemicolon => ";",
+            Keys.OemQuotes => "'",
+            Keys.OemOpenBrackets => "[",
+            Keys.OemCloseBrackets => "]",
+            Keys.OemBackslash or Keys.OemPipe => @"\",
+            Keys.OemMinus => "-",
+            Keys.Oemplus => "=",
+            Keys.Oemtilde => "`",
+            Keys.OemQuestion => "/",
+            _ => "",
+        };
     }
 
     /// <summary>

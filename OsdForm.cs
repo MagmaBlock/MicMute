@@ -78,6 +78,25 @@ internal sealed class OsdForm : Form
         ShowInternal(text, durationMs);
     }
 
+    /// <summary>
+    /// Show the OSD until explicitly hidden. Used for sticky PTT "mic listening"
+    /// where the user needs a persistent indicator that the mic is hot.
+    /// </summary>
+    public void ShowPersistent(string text, bool isMuted)
+    {
+        _showMuted = isMuted;
+        _customText = text;
+        ShowInternal(text, -1);
+    }
+
+    /// <summary>Hide a persistent OSD. Safe to call when not shown.</summary>
+    public void HidePersistent()
+    {
+        if (_disposed || IsDisposed) return;
+        _dismissTimer.Stop();
+        if (Visible) Hide();
+    }
+
     private void ShowInternal(string displayText, int durationMs)
     {
         // Defensive: any failure in measurement/positioning should not kill
@@ -138,9 +157,14 @@ internal sealed class OsdForm : Form
 
             if (!Visible) Show();
 
+            // durationMs <= 0 is the "persistent" sentinel — no auto-dismiss.
+            // Caller owns Hide() via HidePersistent().
             _dismissTimer.Stop();
-            _dismissTimer.Interval = Math.Max(500, durationMs);
-            _dismissTimer.Start();
+            if (durationMs > 0)
+            {
+                _dismissTimer.Interval = Math.Max(500, durationMs);
+                _dismissTimer.Start();
+            }
         }
         catch (Exception ex)
         {
