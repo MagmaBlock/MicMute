@@ -15,11 +15,12 @@ A lightweight system tray utility that lets you mute and unmute your microphone 
 ## Features
 
 - **Global hotkey**: `Win + Shift + Ctrl + A` (configurable) toggles mic mute system-wide
-- **Push-to-Talk mode**: Hold key to unmute, release to re-mute
+- **Push-to-Talk mode**: Hold key to unmute, release to re-mute. Fullscreen-safe and accepts bare modifier keys (Right-Ctrl alone, etc.) the way Discord does — no keyboard hook, nothing for game anti-cheat to flag.
+- **Sticky PTT**: Left-click the tray in Push-to-Talk mode to hold the mic open without holding the hotkey. A persistent "mic listening" bubble stays on screen so you can't forget. Click again to resume normal PTT.
 - **Deafen mode**: Mute both mic and speakers simultaneously (separate hotkey)
 - **Tray icon**: Green = active, Red = muted. Left-click to toggle.
 - **On-screen display**: Floating dark bubble above the taskbar shows mute state
-- **Mute Lock**: Prevents other apps from silently changing your mute state
+- **Mute Lock**: Reverts external mute changes on the next 15-second sync tick. Catches drive-by changes from meeting apps or OS sound settings. Not instant — apps that actively manage mute mid-call (Discord PTT, etc.) will win in the moment.
 - **Mic source selection**: Pick which microphone to control
 - **Sound feedback**: Audible tone on mute/unmute (custom .wav support)
 - **Custom icons**: Replace default tray icons with your own .ico files
@@ -76,9 +77,11 @@ Releases publish a `SHA256SUMS` file alongside the exe. The in-app **Update** bu
 
 ### Modes
 
-**Toggle** (default): Press the hotkey to mute, press again to unmute.
+**Toggle** (default): Press the hotkey to mute, press again to unmute. Left-click the tray for the same effect.
 
-**Push-to-Talk**: Hold the hotkey to unmute. Release to re-mute. Switch via tray menu or middle-click the icon.
+**Push-to-Talk**: Hold the hotkey to unmute. Release to re-mute. Switch via tray menu or middle-click the icon. Push-to-Talk always starts muted at launch.
+
+**Sticky PTT**: In Push-to-Talk mode, left-click the tray icon to unmute and pause the hotkey. A persistent indicator stays on screen until you left-click again to re-mute. Useful for holding the mic open during a long conversation without holding a key.
 
 **Deafen**: Assign a separate hotkey in Settings. Mutes both mic and speakers. Press again to restore both.
 
@@ -86,7 +89,7 @@ Releases publish a `SHA256SUMS` file alongside the exe. The in-app **Update** bu
 
 Right-click the tray icon for the full menu:
 - Toggle mute
-- Change hotkey (supports AHK syntax: `#` Win, `^` Ctrl, `!` Alt, `+` Shift)
+- Current hotkey combo (click to change — supports AHK syntax: `#` Win, `^` Ctrl, `!` Alt, `+` Shift)
 - Switch between Toggle and Push-to-Talk modes
 - Select mic source
 - Open Settings, Help, Sound Settings
@@ -116,7 +119,7 @@ DeafenHotkey=
 | `Mode` | `toggle` | `toggle` or `push-to-talk` |
 | `OSD_Enabled` | `0` | Show on-screen mute indicator |
 | `OSD_Duration` | `1500` | OSD display time in ms |
-| `MuteLock` | `0` | Prevent external apps from changing mute |
+| `MuteLock` | `0` | Revert external mute changes on the 15s sync tick |
 | `MiddleClickToggle` | `1` | Middle-click tray to switch modes |
 | `StartMuted` | `no` | `no`, `yes`, `unmuted`, or `last` |
 | `DeafenHotkey` | *(empty)* | Hotkey for deafen mode |
@@ -128,7 +131,7 @@ DeafenHotkey=
 
 MicMute uses the Windows Core Audio COM APIs (`IAudioEndpointVolume`) to control microphone mute state directly — no dependencies on any specific app. Global hotkeys are registered via `RegisterHotKey` and the tray icon is built using WinForms `NotifyIcon`.
 
-A 5-second periodic sync timer detects external mute changes, device hot-plug events, and enforces Mute Lock when enabled.
+A 15-second periodic sync timer detects external mute changes, device hot-plug events, and enforces Mute Lock when enabled.
 
 ## Project Structure
 

@@ -4,6 +4,30 @@
 
 All notable changes to MicMute are documented here.
 
+## [2.1.9] - 2026-04-17
+
+### Added
+- **Sticky Push-to-Talk via tray click** — in Push-to-Talk mode, left-click the tray icon (or the "Toggle Mute" menu item) to unmute the mic and pause the hotkey. A persistent "PTT — mic listening" bubble stays on screen until you left-click again to re-mute. Useful for holding the mic open during a long conversation without keeping a key held.
+- **Inline hotkey capture in Settings** — click the Toggle Mute or Deafen hotkey field, the box goes yellow, press your combo — captured in place. No more separate pop-up window. Escape cancels, Enter commits, click away commits.
+- **Hotkey validation at Save** — MicMute now warns you if your Toggle and Deafen hotkeys are the same (they can't both fire), if another app already has your combo claimed via Windows' global-hotkey system, if your combo isn't valid for the current mode, or (in PTT mode) if it's a key you'd press during normal typing.
+- **Custom file validation** — picking a bogus `.ico` (e.g. a PNG renamed) or a compressed WAV (MP3/ADPCM/µ-law) is rejected up front with an explanation instead of silently failing later. Very large files warn with a soft prompt.
+
+### Changed
+- **Push-to-Talk works in fullscreen games by default** — the "Low-latency PTT" opt-in toggle is gone. PTT now uses the passive polling path unconditionally, so fullscreen-exclusive games no longer eat your hotkey, and bare modifier keys (Right-Ctrl alone, etc.) work the way Discord does them. Nothing for game anti-cheat to flag — same hardware-state API games read themselves.
+- **Push-to-Talk always starts muted** — no more needing to press your hotkey once at launch before anything seems to happen. Settings → On startup notes this when you're in PTT mode.
+- **Tray menu refreshed** — MicMute title is centered at the top. The hotkey line is now just the combo itself, bold, bracketed by separators — click to open Settings. Settings moved above Exit in its own section.
+- **Settings window refreshed** — Hotkeys and Custom Files pack into tidy two-column grids; OSD Duration and "On startup:" share rows with their checkboxes; Mute Lock hint sits inline; OSD Duration is a spin box (min 500 ms, step 100); the Save button replaces OK. Dialog is shorter top-to-bottom without losing anything.
+- **Mute Lock label made honest** — now reads "reverts external mute changes every 15 seconds (not instant)" so you know what it actually does. It's a 15-second fight-back, not a real-time veto — if Discord or Zoom sets mute mid-call, MicMute waits up to 15 s and flips it back.
+
+### Fixed
+- **OSD Duration field doesn't silently swallow bad input** — now a proper spin box (500–10 000 in 100 ms steps).
+- **Hotkey stays working after mic unplug/replug in PTT mode** — before, the polling path would die on mic disconnect and never restart; Settings or a mode switch was the only way back. Auto-reconnect now re-arms the hotkey.
+- **Change Hotkey window button sizes and alignment** — consolidated onto a shared factory so every button in every dialog is the same height, same style, same alignment. Addresses the "every tab has slightly different buttons" drift pattern.
+
+### Notes
+- Existing hotkey bindings and config survive the upgrade.
+- The old `LowLatencyPtt=0/1` line in your MicMute.ini is now ignored — polling is always-on in PTT mode. It'll disappear from the INI the next time Settings writes.
+
 ## [2.1.8] - 2026-04-17
 
 ### Added
