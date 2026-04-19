@@ -48,3 +48,4 @@ MASTER_BUGLIST.md
 
 # Build output
 publish/
+.code-graph/
