@@ -926,7 +926,15 @@ internal sealed class UpdateDialog : Form
             return false;
 
         string host = uri.Host;
+        // GitHub release-asset CDN. Both hosts seen in the wild — GitHub rolled
+        // `release-assets.githubusercontent.com` alongside the legacy
+        // `objects.githubusercontent.com`, and either can be the redirect target
+        // for a `github.com/.../releases/download/...` GET. Both are allow-listed
+        // so the manual per-hop redirect validator doesn't fail when GitHub
+        // routes through the new edge.
         if (host.Equals("objects.githubusercontent.com", StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (host.Equals("release-assets.githubusercontent.com", StringComparison.OrdinalIgnoreCase))
             return true;
         if (host.Equals("api.github.com", StringComparison.OrdinalIgnoreCase) &&
             uri.AbsolutePath.StartsWith($"/repos/{GitHubRepo}/", StringComparison.OrdinalIgnoreCase))

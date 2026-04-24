@@ -4,6 +4,11 @@
 
 All notable changes to MicMute are documented here.
 
+## [2.1.11] - 2026-04-23
+
+### Fixed
+- **The in-app updater now works again.** GitHub recently started serving release-asset downloads from a new CDN host (`release-assets.githubusercontent.com`) alongside the legacy one (`objects.githubusercontent.com`). MicMute's self-updater follows redirects manually and validates each hop against an explicit allowlist — the new host wasn't on it, so clicking *Upgrade Now* failed with `URL is not from an allowed origin`. Both hosts are now allowlisted. **Affected version:** v2.1.10 — that build shipped with the old allowlist and cannot self-update to this fix. To get past it, run `winget upgrade itsnateai.MicMute` or download `MicMute.exe` from the GitHub release page once and replace your copy. After v2.1.11 the self-updater works again as normal.
+
 ## [2.1.10] - 2026-04-18
 
 ### Added
