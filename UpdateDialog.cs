@@ -560,6 +560,7 @@ internal sealed class UpdateDialog : Form
             Process proc;
             try
             {
+                // nosemgrep: gitlab.security_code_scan.SCS0001-1 -- exePath is Environment.ProcessPath; the replacement binary was SHA256-verified above (version-gated fail-closed at FIRST_HASH_EMITTING_VERSION 2.1.10) against a SHA256SUMS asset from the github.com/itsnateai/ allowlisted origin
                 proc = Process.Start(new ProcessStartInfo(exePath)
                 {
                     Arguments = "--after-update",
