@@ -2,6 +2,8 @@
 
 *LTR — Long-Term Release · one-click self-update built in.*
 
+> **Stuck on v2.1.10?** The in-app *Update* button on that build can't reach the latest release because GitHub silently changed its asset-hosting CDN host and the older allowlist didn't know about it. One-time rescue: run `winget upgrade itsnateai.MicMute` or download `MicMute.exe` from the [latest release](https://github.com/itsnateai/MicMute/releases/latest) and replace your existing copy. v2.1.11+ self-updates normally.
+
 [![GitHub Release](https://img.shields.io/github/v/release/itsnateai/MicMute)](https://github.com/itsnateai/MicMute/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![.NET 8](https://img.shields.io/badge/.NET-8.0-purple)](https://dotnet.microsoft.com/)
