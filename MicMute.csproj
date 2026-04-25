@@ -12,11 +12,18 @@
     <Nullable>disable</Nullable>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <NoWarn>CA1416</NoWarn>
+    <!-- Flat-layout repo: MicMute.csproj sits at the root, so the SDK glob
+         would otherwise sweep MicMute.Tests/**/*.cs into this assembly. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);MicMute.Tests/**</DefaultItemExcludes>
   </PropertyGroup>
 
   <ItemGroup>
     <EmbeddedResource Include="mic_on.ico" LogicalName="mic_on.ico" />
     <EmbeddedResource Include="mic_off.ico" LogicalName="mic_off.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="MicMute.Tests" />
   </ItemGroup>
 
 </Project>

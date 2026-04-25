@@ -916,7 +916,7 @@ internal sealed class UpdateDialog : Form
     /// longer matches the way a `StartsWith` prefix check would have.
     /// HTTPS-only, explicit host set, explicit owner scope on github.com.
     /// </summary>
-    private static bool IsAllowedReleaseOrigin(string url)
+    internal static bool IsAllowedReleaseOrigin(string url)
     {
         if (string.IsNullOrEmpty(url))
             return false;

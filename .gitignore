@@ -3,6 +3,10 @@ bin/
 obj/
 *.exe
 *.log
+TestResults/
+[Tt]est[Rr]esults/
+coverage*.xml
+coverage*.json
 
 # Config
 *.ini
