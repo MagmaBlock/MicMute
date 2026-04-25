@@ -9,12 +9,6 @@ using System.Drawing;
 /// immediately flaggable with `grep -n "= [0-9]" *.cs | grep -v UiTokens`.
 /// If we want to change the look (e.g. BtnHeight 28 → 32), we edit one
 /// constant and every control updates together.
-///
-// nosemgrep: ai.generic.detect-generic-ai-anthprop.detect-generic-ai-anthprop -- detector fires on "_.claude/" path references; these are cross-project doc links, not security signals
-/// See `_.claude/_templates/snippets/csharp/winforms-controls-canonical.md`
-// nosemgrep: ai.generic.detect-generic-ai-anthprop.detect-generic-ai-anthprop -- same as above
-/// for the cross-project pattern + `_.claude/_templates/lessons-learned/
-/// principles/content-aware-dialog-sizing.md` for the width rule.
 /// </summary>
 internal static class UiTokens
 {
