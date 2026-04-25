@@ -145,8 +145,7 @@ A 15-second periodic sync timer detects external mute changes, device hot-plug e
 | `AudioManager.cs` | Core Audio COM interop — mute, enumerate, speaker control |
 | `Config.cs` | INI config reader/writer with hotkey parsing |
 | `OsdForm.cs` | On-screen display overlay (click-through, auto-dismiss) |
-| `SettingsDialog.cs` | Settings GUI |
-| `HotkeyDialog.cs` | Hotkey change dialog |
+| `SettingsDialog.cs` | Settings GUI — includes inline hotkey capture |
 | `HelpWindow.cs` | Help text window |
 | `NativeMethods.cs` | Win32 P/Invoke declarations |
 | `ShortcutHelper.cs` | Windows .lnk shortcut creation for startup |

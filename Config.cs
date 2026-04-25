@@ -591,7 +591,7 @@ internal sealed class Config
             "NUMPADDIV" or "NUMPAD/" => 0x6F,
             "NUMPADDOT" or "NUMPAD." => 0x6E,
             "NUMPADENTER" => 0x0D, // same VK, distinguishable by extended flag
-            // VK_OEM_* punctuation — HotkeyDialog can capture these as bare keys
+            // VK_OEM_* punctuation — SettingsDialog inline capture returns these as bare keys
             // (US layout — other layouts map the same VK to different glyphs)
             ";" or ":" => 0xBA,      // VK_OEM_1
             "=" or "+" => 0xBB,      // VK_OEM_PLUS

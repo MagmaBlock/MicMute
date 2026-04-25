@@ -70,7 +70,7 @@ internal sealed class SettingsDialog : Form
         // ── Hotkeys (compact 2-column grid) ──
         // Same 2-column rhythm as the Custom Files section below: Toggle Mute
         // left, Deafen Mute right. Unified interaction — both use the […]
-        // button to open HotkeyDialog (modal capture). Deafen gets a × clear
+        // button to enter inline capture mode in-place. Deafen gets a × clear
         // button since its default is "unbound"; Toggle doesn't (a main
         // hotkey is always expected).
         AddSectionHeader("Hotkeys", leftMargin, ref y);
