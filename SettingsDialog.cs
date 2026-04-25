@@ -908,7 +908,7 @@ internal sealed class SettingsDialog : Form
     /// Soft caps are deliberately generous — this is about catching obvious
     /// mistakes (wrong file type, 200 MB WAV) without nagging normal use.
     /// </summary>
-    private static (bool hardFail, string message) ValidateCustomFile(string path, string filter)
+    internal static (bool hardFail, string message) ValidateCustomFile(string path, string filter)
     {
         const long IconSoftCapBytes  = 2L * 1024 * 1024;   // 2 MB
         const long WavSoftCapBytes   = 10L * 1024 * 1024;  // 10 MB

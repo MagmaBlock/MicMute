@@ -4,6 +4,12 @@
 
 All notable changes to MicMute are documented here.
 
+## [2.1.12] - 2026-04-25
+
+### Security
+- **Custom icon/sound paths from network shares are now rejected at the file-picker.** Picking an icon or sound from a UNC path (`\\server\share\foo.ico`), forward-slash UNC variant (`//server/share/foo.ico`), or `file://` URI used to silently authenticate to the remote host the moment you clicked the file in the picker — leaking an NTLMv2 challenge that an attacker on the SMB endpoint can capture and crack offline. Settings now shows a clear "Network paths are not allowed" message instead, and the same gate runs again on Apply as defense-in-depth. Local paths are unaffected.
+- **SHA256SUMS verification hardened against future cleanup.** The self-update integrity check previously relied on a downstream `.Trim()` chain to strip carriage returns from CRLF-formatted checksum files (which is exactly what the release CI produces on Windows). A future code cleanup that removed those `.Trim()` calls would have silently broken self-update verification on the very files our own CI generates. Splitting on both `\r` and `\n` upfront removes that fragility — no visible change for normal updates.
+
 ## [2.1.11] - 2026-04-23
 
 ### Fixed
