@@ -465,7 +465,11 @@ internal sealed class UpdateDialog : Form
                     }
                     var hashContent = await ReadBoundedStringAsync(hashResponse, MaxHashFileBytes, ct);
                     string expectedHash = null;
-                    foreach (var line in hashContent.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+                    // Split on both \r and \n so Windows-CI-generated SHA256SUMS files
+                    // (CRLF) parse without relying on the trailing-Trim() chain below
+                    // to strip the stray \r — a future cleanup of those Trim()s would
+                    // otherwise silently break verification on CRLF SUMS files.
+                    foreach (var line in hashContent.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
                     {
                         // Format: "hexhash  filename" or "hexhash *filename"
                         // A7-F11: use Path.GetFileName so entries like "./MicMute.exe" also match.

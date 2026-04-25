@@ -615,7 +615,7 @@ internal sealed class Config
     /// `file://` URI form since SoundPlayer/Icon happily dereferences it
     /// back into the same UNC paths we're trying to block.
     /// </summary>
-    private static string SanitizePath(string path)
+    internal static string SanitizePath(string path)
     {
         if (string.IsNullOrWhiteSpace(path))
             return "";

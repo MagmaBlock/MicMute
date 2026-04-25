@@ -141,4 +141,32 @@ public class UpdateDialogAllowlistTests
         Assert.IsTrue(UpdateDialog.IsAllowedReleaseOrigin(
             "https://github.com/ITSNATEAI/MICMUTE/releases/latest"));
     }
+
+    // Defensive pins — the audit ran these as black-box probes against Uri.Host
+    // semantics and confirmed they're rejected. Pin the behavior in case .NET's
+    // Uri parser changes how it handles authority/path edge cases.
+
+    [TestMethod]
+    public void HostConfusion_UserinfoAuthority_Rejected()
+    {
+        // Uri.Host returns "evil.example", not "github.com", because RFC 3986
+        // authority parsing puts everything before @ in UserInfo.
+        Assert.IsFalse(UpdateDialog.IsAllowedReleaseOrigin(
+            "https://github.com@evil.example/itsnateai/MicMute/releases/download/v1/MicMute.exe"));
+        Assert.IsFalse(UpdateDialog.IsAllowedReleaseOrigin(
+            "https://github.com:443@evil.example/itsnateai/MicMute/releases/download/v1/MicMute.exe"));
+        Assert.IsFalse(UpdateDialog.IsAllowedReleaseOrigin(
+            "https://api.github.com@evil.example/repos/itsnateai/MicMute/releases/latest"));
+    }
+
+    [TestMethod]
+    public void HostConfusion_PathTraversalToOtherRepo_Rejected()
+    {
+        // Uri normalizes /a/b/../c → /a/c, so the path no longer starts with
+        // /itsnateai/MicMute/ and the prefix check rejects.
+        Assert.IsFalse(UpdateDialog.IsAllowedReleaseOrigin(
+            "https://github.com/itsnateai/MicMute/../EvilRepo/releases/download/v1/x.exe"));
+        Assert.IsFalse(UpdateDialog.IsAllowedReleaseOrigin(
+            "https://api.github.com/repos/itsnateai/MicMute/../EvilRepo/releases/latest"));
+    }
 }

@@ -386,10 +386,13 @@ internal sealed class SettingsDialog : Form
 
         // Custom files — paths are maintained as string fields by the
         // AddCompactFileRow closures (no hidden TextBox phantom controls).
-        _config.IconMuted = (_pathIconMuted ?? "").Trim();
-        _config.IconActive = (_pathIconActive ?? "").Trim();
-        _config.MuteSound = (_pathMuteSound ?? "").Trim();
-        _config.UnmuteSound = (_pathUnmuteSound ?? "").Trim();
+        // SanitizePath is belt-and-braces here: ValidateCustomFile already rejects
+        // UNC at file-pick, but Save-time sanitization keeps Config the single
+        // source of truth so any future textbox-paste path stays defended.
+        _config.IconMuted = Config.SanitizePath((_pathIconMuted ?? "").Trim());
+        _config.IconActive = Config.SanitizePath((_pathIconActive ?? "").Trim());
+        _config.MuteSound = Config.SanitizePath((_pathMuteSound ?? "").Trim());
+        _config.UnmuteSound = Config.SanitizePath((_pathUnmuteSound ?? "").Trim());
 
         bool saved = _config.Save();
         _onApply();
@@ -912,6 +915,15 @@ internal sealed class SettingsDialog : Form
 
         bool isIcon = filter.Contains(".ico", StringComparison.OrdinalIgnoreCase);
         bool isWav  = filter.Contains(".wav", StringComparison.OrdinalIgnoreCase);
+
+        // Reject UNC / file:// before any I/O. Touching `\\server\share\foo.ico`
+        // via FileInfo / new Icon(...) / SoundPlayer triggers SMB auth to the
+        // remote host, leaking an NTLMv2 challenge. Same gate as Config.SanitizePath
+        // \u2014 keep the rules colocated there.
+        if (Config.SanitizePath(path).Length == 0)
+            return (true,
+                "Network paths (UNC, file://) are not allowed for security reasons. " +
+                "Pick a local file.");
 
         FileInfo info;
         try { info = new FileInfo(path); }
