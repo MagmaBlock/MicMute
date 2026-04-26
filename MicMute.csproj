@@ -7,6 +7,11 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <ApplicationIcon>mic_on.ico</ApplicationIcon>
     <Version>2.1.11</Version>
+    <Description>Global-hotkey microphone mute/unmute tray utility</Description>
+    <Product>MicMute</Product>
+    <Company>itsNate</Company>
+    <Authors>itsNate</Authors>
+    <Copyright>Copyright (c) 2026 itsNate</Copyright>
     <AssemblyName>MicMute</AssemblyName>
     <RootNamespace>MicMute</RootNamespace>
     <Nullable>disable</Nullable>
