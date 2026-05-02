@@ -151,6 +151,20 @@ A 15-second periodic sync timer detects external mute changes, device hot-plug e
 | `ShortcutHelper.cs` | Windows .lnk shortcut creation for startup |
 | `mic_on.ico` / `mic_off.ico` | Tray icons (embedded as resources) |
 
+## Supporting This Project
+
+This app is free and open source. If it saves you time, consider supporting continued development:
+
+<p>
+  <a href="https://buymeacoffee.com/itsnate"><img src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black" alt="Buy Me a Coffee"></a>
+</p>
+
+- **[Buy Me a Coffee](https://buymeacoffee.com/itsnate)** — one-time support
+
+You can also build from source for free — see the build instructions above.
+
+---
+
 ## License
 
 [MIT](LICENSE)
