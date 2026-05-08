@@ -6,7 +6,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
     <ApplicationIcon>mic_on.ico</ApplicationIcon>
-    <Version>2.1.11</Version>
+    <Version>2.1.13</Version>
     <Description>Global-hotkey microphone mute/unmute tray utility</Description>
     <Product>MicMute</Product>
     <Company>itsNate</Company>

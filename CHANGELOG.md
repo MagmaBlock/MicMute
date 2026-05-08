@@ -4,6 +4,19 @@
 
 All notable changes to MicMute are documented here.
 
+## [2.1.13] - 2026-05-07
+
+### Added
+- **Tray icon now appears in the taskbar by default on Windows 11.** Previously, every fresh install (or every WinGet upgrade that landed in a new versioned dir) defaulted to hidden-in-overflow until you manually toggled "Show icon in taskbar" under Settings → Personalization → Taskbar → Other system tray icons. MicMute now writes the per-icon `IsPromoted=1` flag automatically, so the icon is visible from first launch. If you previously hid it deliberately (`IsPromoted=0`), that choice is respected — we only promote when the value is missing or already `1`.
+- **Cleanup of stale tray-icon entries from prior versions.** Each WinGet upgrade and each .NET single-file extraction left behind a registry subkey under `HKCU\Control Panel\NotifyIconSettings` pointing to a now-deleted install path; over time these accumulated as duplicate "MicMute" entries in the Settings list (some users were seeing six). On first launch of v2.1.13, any subkey whose `ExecutablePath` basename matches `MicMute.exe` AND points to a path that no longer exists is reaped. Conservative — never touches sparse/orphan subkeys, never touches other apps' subkeys, never touches your currently-running install.
+
+### Changed
+- **Initial tray-icon tooltip seeded before `Visible = true`** so Shell_NotifyIcon passes `NIF_TIP` and Explorer writes the full `NotifyIconSettings` schema on `NIM_ADD`. Without the seed, the per-icon subkey was sparse (`IconSnapshot` only, no `ExecutablePath`), forcing the new promoter into its slower orphan-claim fallback on every cold start. The seed text is overwritten by `SyncTrayIcon` a microsecond later — visible behavior unchanged.
+
+### Notes
+- These changes are no-ops on Windows 10 and Server SKUs (the `NotifyIconSettings` registry schema is Win11 22H2+ only). The build-version guard short-circuits before any registry access.
+- All registry interaction is wrapped in try/catch and logged through `Log.Info` / `Log.Warn` (default log path `%LOCALAPPDATA%\MicMute\micmute.log`). A schema change in a future Windows build silently no-ops rather than crashing the tray.
+
 ## [2.1.12] - 2026-04-25
 
 ### Security

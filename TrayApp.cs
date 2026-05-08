@@ -99,10 +99,27 @@ internal sealed class TrayApp : Form
             ApplyStartupMutePreference();
         }
 
-        // Tray icon
+        // Tray icon. Win11 tray-icon hygiene
+        // (snippet: _.claude/_templates/snippets/csharp/tray-icon-promoter.md):
+        //   1. Sweep zombies left behind by prior versioned WinGet installs and
+        //      .NET single-file extraction-cache churn — without this, the user
+        //      accumulates "N MicMutes" cruft in Settings → Other system tray
+        //      icons across upgrades.
+        //   2. Capture the baseline NotifyIconSettings subkey set BEFORE NIM_ADD
+        //      so the promoter's Phase-2 orphan-claim has a "before" reference.
+        //   3. Seed Text=non-empty BEFORE Visible=true so Shell_NotifyIcon
+        //      passes NIF_TIP and Explorer writes the full schema (without it
+        //      the subkey is sparse — only IconSnapshot, no ExecutablePath —
+        //      forcing the slower Phase-2 path on every cold start).
+        TrayIconPromoter.SweepStaleEntries(
+            ourExeName: Path.GetFileName(Application.ExecutablePath),
+            currentExePath: Application.ExecutablePath);
+        var trayBaseline = TrayIconPromoter.CaptureBaseline();
+
         _trayMenu = new ContextMenuStrip();
         _trayIcon = new NotifyIcon
         {
+            Text = "MicMute",   // seed for NIF_TIP — overwritten by SyncTrayIcon below
             Visible = true,
             ContextMenuStrip = _trayMenu,
         };
@@ -112,6 +129,10 @@ internal sealed class TrayApp : Form
         BuildTrayMenu();
         InvalidateTooltipCache();
         SyncTrayIcon();
+
+        // Promote our subkey to visible-in-taskbar (vs hidden-in-overflow). Ticks
+        // for up to 10 s while Explorer populates the schema, then self-disposes.
+        StartTrayIconPromotion(trayBaseline);
 
         // OSD form (must be created before hotkey registration — errors show via OSD)
         _osdForm = new OsdForm();
@@ -405,6 +426,30 @@ internal sealed class TrayApp : Form
         if (_flashing)
             return;
         SetTrayIcon();
+    }
+
+    /// <summary>
+    /// Drive the TrayIconPromoter retry timer until our subkey is identified or
+    /// the 10 s budget elapses. Idempotent — Phase 1 no-ops once IsPromoted=1.
+    /// Snippet: _.claude/_templates/snippets/csharp/tray-icon-promoter.md.
+    /// </summary>
+    private void StartTrayIconPromotion(HashSet<string> baseline)
+    {
+        var promoteTimer = new System.Windows.Forms.Timer { Interval = 500 };
+        int attempts = 0;
+        const int maxAttempts = 20;   // 500 ms * 20 = 10 s cap
+        promoteTimer.Tick += (_, _) =>
+        {
+            attempts++;
+            bool done = TrayIconPromoter.TryPromote(Application.ExecutablePath, baseline)
+                        || attempts >= maxAttempts;
+            if (done)
+            {
+                promoteTimer.Stop();
+                promoteTimer.Dispose();
+            }
+        };
+        promoteTimer.Start();
     }
 
     private void SetTrayIcon()
@@ -844,9 +889,14 @@ internal sealed class TrayApp : Form
         }
         else if (_wmTaskbarCreated != 0 && m.Msg == (int)_wmTaskbarCreated)
         {
-            // Explorer restarted — re-show tray icon
+            // Explorer restarted — re-show tray icon and re-promote so we don't
+            // get exiled to overflow. Capture a fresh baseline first; Explorer's
+            // per-icon registry cache got nuked by the restart so subkeys may
+            // transit through the orphan state again.
+            var recoveryBaseline = TrayIconPromoter.CaptureBaseline();
             _trayIcon.Visible = true;
             SyncTrayIcon();
+            StartTrayIconPromotion(recoveryBaseline);
         }
 
         base.WndProc(ref m);
