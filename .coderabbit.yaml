@@ -1,0 +1,98 @@
+# CodeRabbit configuration — schema: https://docs.coderabbit.ai/reference/yaml-template
+language: "en-US"
+
+tone_instructions: >-
+  Windows tray app. Manual COM vtable dispatch in NativeMethods.cs is intentional
+  (no generated interop). Focus on COM lifetime, hotkey reliability, and self-update
+  flow correctness — not generic "unsafe interop" alarms.
+
+reviews:
+  profile: "chill"
+  poem: false
+  collapse_walkthrough: true
+  changed_files_summary: true
+  high_level_summary: true
+  sequence_diagrams: false
+  assess_linked_issues: true
+  related_issues: true
+
+  path_filters:
+    - "!bin/**"
+    - "!obj/**"
+    - "!publish/**"
+    - "!**/*.user"
+    - "!**/*.suo"
+    - "!**/*.pdb"
+    - "!**/*.ini"
+    - "!*.ico"
+    - "!*.exe"
+    - "!screenshots/**"
+    - "!CHANGELOG.md"
+    - "!AUDIT_TASKS.md"
+    - "!AUDIT_PLAN.md"
+    - "!MASTER_BUGLIST.md"
+    - "!TODO_LIST.md"
+    - "!SCHEDULED_TASKS.md"
+
+  path_instructions:
+    - path: "NativeMethods.cs"
+      instructions: |
+        Manual COM vtable dispatch through CoCreateInstance + Marshal.GetDelegateForFunctionPointer
+        + Marshal.ReadIntPtr is the INTENTIONAL design — no auto-generated interop, no CsWin32.
+        Every CoCreateInstance and out-pointer has a matching Marshal.Release in try/finally,
+        and PROPVARIANT is cleared via PropVariantClear + FreeCoTaskMem.
+
+        Do NOT flag this pattern as "unsafe", "should use CsWin32", "should use generated
+        interop", or "consider Windows.Devices.Enumeration". It is by design.
+
+        DO flag: missing Release calls on early-return paths, exception paths that bypass
+        cleanup, incorrect vtable slot indices, IID/CLSID typos, PROPVARIANT not cleared
+        before reuse, and any thread-safety issue (audio device-change events arrive on
+        a non-UI thread — UI mutations must marshal via Invoke/BeginInvoke).
+    - path: "AudioManager.cs"
+      instructions: |
+        COM lifetime owner. Pair every Get* with the matching Release. IMMNotificationClient
+        callbacks arrive on a non-UI thread — flag any UI mutation that is not marshalled
+        to the UI thread. Degraded mode (no mic on startup) re-attempts Initialize via
+        OnSyncTick — do not break the re-init path.
+    - path: "UpdateDialog.cs"
+      instructions: |
+        Self-update with a per-hop allowlisted host set: github.com/itsnateai/MicMute/,
+        api.github.com/repos/itsnateai/MicMute/, objects.githubusercontent.com,
+        release-assets.githubusercontent.com. Every URL must pass IsAllowedReleaseOrigin
+        on every redirect hop. Flag any change that broadens the allowlist, skips SHA256
+        verification, or relaxes the .new/.old/.ok rename dance.
+    - path: "TrayApp.cs"
+      instructions: |
+        Owns hotkey registration, PTT polling timer, sync timer (15 s), OSD plumbing,
+        and TaskbarCreated message handling for explorer-restart recovery. Single-instance
+        guarded by named mutex Global\\MicMute_SingleInstance in Program.cs.
+    - path: "MicMute.Tests/**"
+      instructions: |
+        xUnit test project. Tests must be deterministic and must NOT require a real
+        audio endpoint at runtime.
+    - path: "**/*.cs"
+      instructions: |
+        C# 12 / .NET 8 / WinForms. Tray app — WinForms is the chosen UI stack, do NOT
+        flag its use or suggest WPF/WinUI/MAUI. Prefer file-scoped namespaces, modern
+        pattern matching, and nullable reference types (already enabled).
+
+  auto_review:
+    enabled: true
+    drafts: false
+    auto_incremental_review: true
+    base_branches:
+      - "main"
+
+  tools:
+    gitleaks:
+      enabled: true
+    actionlint:
+      enabled: true
+    markdownlint:
+      enabled: true
+    yamllint:
+      enabled: true
+
+chat:
+  auto_reply: true
