@@ -23,9 +23,8 @@ reviews:
     - "!**/*.user"
     - "!**/*.suo"
     - "!**/*.pdb"
-    - "!**/*.ini"
-    - "!*.ico"
-    - "!*.exe"
+    - "!**/*.ico"
+    - "!**/*.exe"
     - "!screenshots/**"
     - "!CHANGELOG.md"
     - "!AUDIT_TASKS.md"
@@ -42,19 +41,37 @@ reviews:
         Every CoCreateInstance and out-pointer has a matching Marshal.Release in try/finally,
         and PROPVARIANT is cleared via PropVariantClear + FreeCoTaskMem.
 
-        Do NOT flag this pattern as "unsafe", "should use CsWin32", "should use generated
-        interop", or "consider Windows.Devices.Enumeration". It is by design.
+        Do NOT flag the EXISTING vtable-dispatch / Marshal.ReadIntPtr / PROPVARIANT pattern as
+        "unsafe", "should use CsWin32", "should use generated interop", or "consider
+        Windows.Devices.Enumeration". It is by design.
 
-        DO flag: missing Release calls on early-return paths, exception paths that bypass
-        cleanup, incorrect vtable slot indices, IID/CLSID typos, PROPVARIANT not cleared
-        before reuse, and any thread-safety issue (audio device-change events arrive on
-        a non-UI thread — UI mutations must marshal via Invoke/BeginInvoke).
+        DO flag: NEW unsafe patterns introduced by a PR that go beyond the existing surface
+        (raw stackalloc'd buffers passed to native code, fixed-statement scope leaks, new
+        CoCreateInstance calls that don't follow the established Release-in-finally pattern);
+        missing Release calls on early-return paths, exception paths that bypass cleanup,
+        incorrect vtable slot indices, IID/CLSID typos, PROPVARIANT not cleared before reuse,
+        and any thread-safety issue (audio device-change events arrive on a non-UI thread —
+        UI mutations must marshal via Invoke/BeginInvoke).
     - path: "AudioManager.cs"
       instructions: |
         COM lifetime owner. Pair every Get* with the matching Release. IMMNotificationClient
         callbacks arrive on a non-UI thread — flag any UI mutation that is not marshalled
         to the UI thread. Degraded mode (no mic on startup) re-attempts Initialize via
         OnSyncTick — do not break the re-init path.
+    - path: "Config.cs"
+      instructions: |
+        INI persistence via WritePrivateProfileString / GetPrivateProfileString P/Invoke
+        (DllImport on kernel32). The buffer-size argument to GetPrivateProfileString must
+        accommodate the longest expected value or silent truncation occurs — flag any
+        change that hardcodes a smaller buffer than current callers use. Config.FixEncoding
+        handles UTF-16 LE → ANSI on first load (the ANSI INI API would otherwise mangle).
+        Path sanitization happens here; flag any user-controlled path that bypasses it.
+    - path: "ShortcutHelper.cs"
+      instructions: |
+        Startup-folder .lnk creation via WScript.Shell COM (Type.GetTypeFromProgID +
+        Activator.CreateInstance). COM objects must be released via Marshal.FinalReleaseComObject
+        in try/finally — flag any path that returns without releasing the WScript.Shell or
+        IWshShortcut instance, including exception paths.
     - path: "UpdateDialog.cs"
       instructions: |
         Self-update with a per-hop allowlisted host set: github.com/itsnateai/MicMute/,
@@ -81,6 +98,15 @@ reviews:
     enabled: true
     drafts: false
     auto_incremental_review: true
+    auto_pause_after_reviewed_commits: 3
+    ignore_title_keywords:
+      - "chore: release"
+      - "release v"
+      - "bump version"
+    ignore_usernames:
+      - "dependabot[bot]"
+      - "release-please[bot]"
+      - "github-actions[bot]"
     base_branches:
       - "main"
 
@@ -92,6 +118,8 @@ reviews:
     markdownlint:
       enabled: true
     yamllint:
+      enabled: true
+    semgrep:
       enabled: true
 
 chat:
