@@ -76,8 +76,9 @@ reviews:
         Self-update with a per-hop allowlisted host set: github.com/itsnateai/MicMute/,
         api.github.com/repos/itsnateai/MicMute/, objects.githubusercontent.com,
         release-assets.githubusercontent.com. Every URL must pass IsAllowedReleaseOrigin
-        on every redirect hop. Flag any change that broadens the allowlist, skips SHA256
-        verification, or relaxes the .new/.old/.ok rename dance.
+        on every redirect hop. Flag any change that adds NEW hosts to the allowlist,
+        skips SHA256 verification, or relaxes the .new/.old/.ok rename dance.
+        (Narrowing the allowlist or removing hosts is fine — don't flag those.)
     - path: "TrayApp.cs"
       instructions: |
         Owns hotkey registration, PTT polling timer, sync timer (15 s), OSD plumbing,
@@ -102,6 +103,9 @@ reviews:
       - "chore: release"
       - "release v"
       - "bump version"
+      - "changelog"
+      - "release notes"
+      - "cut v"
     ignore_usernames:
       - "dependabot[bot]"
       - "release-please[bot]"
