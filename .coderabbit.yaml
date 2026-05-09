@@ -108,7 +108,7 @@ reviews:
       - "release-please[bot]"
       - "github-actions[bot]"
     base_branches:
-      - "main"
+      - ".*"
 
   tools:
     gitleaks:
