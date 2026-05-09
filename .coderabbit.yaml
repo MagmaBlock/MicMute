@@ -26,7 +26,6 @@ reviews:
     - "!**/*.ico"
     - "!**/*.exe"
     - "!screenshots/**"
-    - "!CHANGELOG.md"
     - "!AUDIT_TASKS.md"
     - "!AUDIT_PLAN.md"
     - "!MASTER_BUGLIST.md"
