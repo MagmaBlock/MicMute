@@ -91,7 +91,14 @@ Right-click the tray icon → ""Mic Source"" to choose which microphone MicMute 
         ClientSize = new Size(540, 560);
         MinimumSize = new Size(440, 360);
         StartPosition = FormStartPosition.CenterScreen;
-        // A5-F12: AutoScaleMode.Dpi so the window responds correctly at 125/150/200 % scaling.
+        // Pin design baseline to 96 DPI BEFORE setting AutoScaleMode so every
+        // literal `new Size(...)` / `new Point(...)` is interpreted as 96-DPI
+        // design pixels, regardless of which monitor first realizes the form.
+        // Without this pair, AutoScaleDimensions defaults to whatever the
+        // first monitor reports; on a 125%/150% laptop the form then gets
+        // double-scaled and controls clip. (v2.1.10 set only AutoScaleMode —
+        // incomplete; closed in v2.1.14.)
+        AutoScaleDimensions = new SizeF(96F, 96F);
         AutoScaleMode = AutoScaleMode.Dpi;
 
         // A5-F12: named constants for margin / gap eliminate magic numbers.

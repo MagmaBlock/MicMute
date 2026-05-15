@@ -59,9 +59,18 @@ internal sealed class SettingsDialog : Form
         MinimizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
         BackColor = Color.White;
+        // Pin design baseline to 96 DPI BEFORE Font assignment and AutoScaleMode
+        // so every literal `new Size(...)` / `new Point(...)` is interpreted as
+        // 96-DPI design pixels regardless of which monitor first realizes the
+        // form. Without the pin, AutoScaleDimensions defaults to the first-
+        // realized monitor's DPI; on a 125%/150% display the dialog then
+        // double-scales and controls clip. Order matches the SyncthingPause v3.0.1
+        // reference impl — pin first, Font + everything else after.
+        AutoScaleDimensions = new SizeF(96F, 96F);
+        AutoScaleMode = AutoScaleMode.Dpi;
+
         _dialogFont = new Font(UiTokens.PrimaryFont, UiTokens.DialogFontSize);
         Font = _dialogFont;
-        AutoScaleMode = AutoScaleMode.Dpi;
 
         int y = 14;
         int leftMargin = 16;
@@ -143,6 +152,11 @@ internal sealed class SettingsDialog : Form
             Increment = 100,
             Value = Math.Clamp(config.OsdDuration, 500, 10000),
             Width = osdDurWidth,
+            // NumericUpDown composes spinner buttons + text via nested HWNDs
+            // whose scaling math diverges by a few px at every non-integer
+            // ratio. MinimumSize floors the outer bounds so AutoScale can't
+            // shrink the spinner band into the digit area.
+            MinimumSize = new Size(osdDurWidth, 26),
             Location = new Point(osdSectionRight - osdDurWidth, osdRowY - 1),
             TextAlign = HorizontalAlignment.Left,
         };

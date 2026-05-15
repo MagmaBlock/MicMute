@@ -84,9 +84,12 @@ internal static class Program
         UpdateDialog.CleanupUpdateArtifacts();
         ShortcutHelper.ValidateStartupShortcut();
 
-        Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
-        Application.EnableVisualStyles();
-        Application.SetCompatibleTextRenderingDefault(false);
+        // Canonical .NET 7+ initializer — source-generated from MicMute.csproj's
+        // <ApplicationHighDpiMode>, <ApplicationDefaultFont>, etc. Replaces the
+        // prior triplet (SetHighDpiMode + EnableVisualStyles +
+        // SetCompatibleTextRenderingDefault) so the csproj properties are the
+        // single source of truth and don't drift from explicit code calls.
+        ApplicationConfiguration.Initialize();
 
         if (isAfterUpdate)
             UpdateDialog.ShowUpdateToast();

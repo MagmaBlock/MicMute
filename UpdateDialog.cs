@@ -64,6 +64,12 @@ internal sealed class UpdateDialog : Form
         MinimizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
         TopMost = true;
+        // Pin design baseline to 96 DPI BEFORE setting AutoScaleMode so every
+        // literal `new Size(...)` / `new Point(...)` below is interpreted as
+        // 96-DPI design pixels regardless of which monitor first realizes the
+        // form. Without the pair, AutoScaleDimensions defaults to the first
+        // monitor's DPI and the dialog clips on 125%/150% displays.
+        AutoScaleDimensions = new SizeF(96F, 96F);
         AutoScaleMode = AutoScaleMode.Dpi;
         ClientSize = new Size(420, 180);
 

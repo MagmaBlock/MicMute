@@ -30,6 +30,11 @@ internal sealed class OsdForm : Form
 
     private bool _showMuted;
     private string _customText;
+    // Cached label measurement from the most recent ShowInternal() call.
+    // OnPaint uses .Height to vertically centre the text against the pill,
+    // which itself grows DPI-aware via Math.Max(28, _labelSize.Height + 10).
+    // Re-measured each Show* so it tracks the current displayText + DPI.
+    private Size _labelSize;
 
     public OsdForm()
     {
@@ -116,9 +121,17 @@ internal sealed class OsdForm : Form
             // retains DrawString (GDI+); the 1-2 px kerning difference is negligible for
             // a short pill label — accepted per design review.
             {
-                var labelSize = TextRenderer.MeasureText(displayText, s_labelFont);
-                int w = 10 + 12 + labelSize.Width + 12;
-                int h = 28;
+                _labelSize = TextRenderer.MeasureText(displayText, s_labelFont);
+                int w = 10 + 12 + _labelSize.Width + 12;
+                // Pill height must clear the rendered text + padding at any
+                // display scale. At 100% scale 9pt Segoe UI is ~15px tall and
+                // 28px gave generous breathing room; at 175% scale it renders
+                // ~26px and the hardcoded 28 clipped descenders. _labelSize is
+                // already DPI-correct (TextRenderer measures at the current
+                // DC), so deriving height from it keeps the pill proportional
+                // across every monitor scale. Floor at 28 to preserve the
+                // intended visual weight at 100%.
+                int h = Math.Max(28, _labelSize.Height + 10);
 
                 // Default anchor: bottom-right corner of the working area.
                 // WorkingArea already excludes the taskbar regardless of its
@@ -193,7 +206,12 @@ internal sealed class OsdForm : Form
         g.SmoothingMode = prev;
 
         string label = _customText ?? (_showMuted ? s_mutedLabel : s_activeLabel);
-        g.DrawString(label, s_labelFont, s_textBrush, 24, 5);
+        // Vertically centre text against the pill — pill height is DPI-aware
+        // (Math.Max(28, _labelSize.Height + 10)), so a fixed top-padding like
+        // the previous y=5 left the text top-aligned at higher scales. Use the
+        // cached label height to centre regardless of current pill height.
+        int textY = Math.Max(0, (ClientSize.Height - _labelSize.Height) / 2);
+        g.DrawString(label, s_labelFont, s_textBrush, 24, textY);
     }
 
     protected override void Dispose(bool disposing)

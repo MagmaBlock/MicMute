@@ -4,6 +4,17 @@
 
 All notable changes to MicMute are documented here.
 
+## [2.1.14] - 2026-05-14
+
+### Fixed
+- **High-DPI rendering corrected on non-100% display scales.** v2.1.10 set `AutoScaleMode = Dpi` on each dialog but did not pin `AutoScaleDimensions` to a 96-DPI design baseline — without that pair, WinForms snapshotted whatever DPI the first-realized monitor reported, which on a 125%/150% laptop produced clipped button bottoms, hidden NumericUpDown digits, and rendering that users on non-100% displays described as "weird." v2.1.14 closes the gap with the canonical 5-layer alignment: `app.manifest` declares `PerMonitorV2`, `<ApplicationHighDpiMode>` in the project file matches so the source-generated `ApplicationConfiguration.Initialize()` doesn't fall back to `SystemAware`, every dialog form pins `AutoScaleDimensions = (96, 96)` **before** `AutoScaleMode = Dpi`, the OSD pill height scales with rendered font metrics instead of a hardcoded 28px, and the OSD-duration NumericUpDown has a `MinimumSize` floor so the spinner band can't shrink into the digit area at non-integer scale factors.
+- **OSD pill no longer clips text at 175% display scale.** Pill height was fixed at 28 logical pixels; at 175% scale the rendered 9pt Segoe UI label is ~26px tall, leaving 2px for vertical centering and clipping descenders below the pill. Height is now computed from the actual measured text size (floored at 28 to preserve the intended visual weight at 100%).
+
+### Notes
+- v2.1.10's "Crisp UI on high-DPI and mixed-DPI setups" wording overstated what shipped — the manifest and csproj DPI declarations were both absent, and the per-form `AutoScaleDimensions` pin was not set. The intent was correct, the implementation was incomplete. v2.1.14 ships the full alignment.
+- Windows does not propagate display-scale changes to already-running processes. After updating to v2.1.14, **restart MicMute** (or sign out and back in) before judging whether the rendering looks right on your laptop.
+- This same DPI fix has been canonicalized as a workspace template and is being applied across all sibling tray apps that share MicMute's WinForms boilerplate; future updates to those apps will mention the same alignment.
+
 ## [2.1.13] - 2026-05-07
 
 ### Added
