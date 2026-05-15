@@ -4,6 +4,11 @@
 
 All notable changes to MicMute are documented here.
 
+## [2.1.15] - 2026-05-15
+
+### Fixed
+- **Hotkey "claimed by another app" false positive when reapplying the same combo.** The Settings dialog's conflict probe in `ValidateHotkeysBeforeApply` called `RegisterHotKey` on the dialog's own HWND to detect whether the captured combo was already taken by another process. `RegisterHotKey` enforces uniqueness on the (modifier, vk) tuple at the thread/process level: if `TrayApp` already owned the user's current hotkey on its own HWND (the normal running state), the dialog's probe call returned false with `ERROR_HOTKEY_ALREADY_REGISTERED` and surfaced as a "claimed by another app" warning where the "another app" was MicMute itself. Symptom: opening Settings → clicking Apply without changing the hotkey reliably triggered the warning, and every attempt to reuse the existing combo was reported as in-use even when no other process held it. v2.1.15 adds a self-conflict guard: if the captured Toggle or Deafen hotkey equals the value currently in `_config.Hotkey` / `_config.DeafenHotkey` (case-insensitive), the probe is skipped for that field. Genuinely new combos still get probed; genuine cross-process conflicts (other apps using `RegisterHotKey`) still produce the warning as before. Apps that intercept via low-level keyboard hooks (Discord PTT, PowerToys) remain undetectable by this probe — the existing dialog text already notes that limitation.
+
 ## [2.1.14] - 2026-05-14
 
 ### Fixed

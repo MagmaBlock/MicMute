@@ -480,9 +480,18 @@ internal sealed class SettingsDialog : Form
         // Discord PTT, PowerToys) won't be detected — the probe will succeed even
         // though those apps will still intercept the combo at runtime.
         // This is therefore a courtesy warning, not a hard block.
+        // Self-conflict guard: skip the probe when the captured combo matches
+        // the one TrayApp already owns on its own HWND. RegisterHotKey is
+        // unique per (mod, vk) tuple per process — a second call from the
+        // dialog's HWND would fail with ERROR_HOTKEY_ALREADY_REGISTERED and
+        // produce a false "claimed by another app" warning where the "another
+        // app" is MicMute itself.
         const int PROBE_ID_MAIN = 0x7A1D;
         const int PROBE_ID_DEAFEN = 0x7A1E;
-        if (!string.IsNullOrEmpty(_capturedMainHK) &&
+        bool mainUnchanged = _capturedMainHK.Equals(_config.Hotkey, StringComparison.OrdinalIgnoreCase);
+        bool deafenUnchanged = _capturedDeafenHK.Equals(_config.DeafenHotkey, StringComparison.OrdinalIgnoreCase);
+        if (!mainUnchanged &&
+            !string.IsNullOrEmpty(_capturedMainHK) &&
             Config.ParseHotkey(_capturedMainHK, out uint probeMMods, out uint probeMVk, allowBare: pttMode))
         {
             bool ok = false;
@@ -511,7 +520,8 @@ internal sealed class SettingsDialog : Form
                 _pendingAckedMainHk = _capturedMainHK;
             }
         }
-        if (!string.IsNullOrEmpty(_capturedDeafenHK) &&
+        if (!deafenUnchanged &&
+            !string.IsNullOrEmpty(_capturedDeafenHK) &&
             Config.ParseHotkey(_capturedDeafenHK, out uint probeDMods, out uint probeDVk, allowBare: false))
         {
             bool ok = false;
