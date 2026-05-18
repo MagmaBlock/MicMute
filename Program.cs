@@ -11,6 +11,11 @@ internal static class Program
         InstallGlobalExceptionHandlers();
 
         bool isAfterUpdate = args.Contains("--after-update");
+        // --after-theme-restart: dispatched by TrayApp.TryAutoRestartForTheme
+        // when the user changes the Theme dropdown in Settings. Same mutex-
+        // retry treatment as --after-update because the outgoing instance is
+        // racing the incoming one for the single-instance lock.
+        bool isAfterThemeRestart = args.Contains("--after-theme-restart");
 
         // Back-compat handoff from v2.1.5 (which used Global\MicMute_SingleInstance).
         // Only relevant during --after-update: the old instance is winding down and
@@ -52,7 +57,7 @@ internal static class Program
         bool acquired;
         try
         {
-            acquired = mutex.WaitOne(isAfterUpdate ? 5000 : 0, false);
+            acquired = mutex.WaitOne((isAfterUpdate || isAfterThemeRestart) ? 5000 : 0, false);
         }
         catch (AbandonedMutexException)
         {
@@ -66,7 +71,7 @@ internal static class Program
             return;
         }
 
-        Log.Info($"MicMute starting (afterUpdate={isAfterUpdate})");
+        Log.Info($"MicMute starting (afterUpdate={isAfterUpdate}, afterThemeRestart={isAfterThemeRestart})");
 
         try
         {

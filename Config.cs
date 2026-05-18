@@ -32,6 +32,11 @@ internal sealed class Config
     public bool MiddleClickToggle = true;
     public string StartMuted = "no"; // "no", "yes", "unmuted", "last"
     public bool LastMuteState;
+    // "System" (default — follow Windows), "Dark", or "Light". Unknown values
+    // resolve to System via Theme.ResolveIsDark. Affects window chrome only
+    // (Settings, Help, Update, OSD, tooltips, tray menu) — tray icons always
+    // render against the user's actual taskbar regardless of this setting.
+    public string ThemeMode = "System";
     // Opt-in: poll-based PTT via GetAsyncKeyState instead of RegisterHotKey.
     // Works over fullscreen-exclusive games and supports bare-modifier keys
     // (LCtrl / RCtrl / RShift / etc.). No keyboard hook is installed — the
@@ -176,6 +181,17 @@ internal sealed class Config
         }
         LastMuteState = ReadIni("LastMuteState", "0") == "1";
 
+        // ThemeMode: canonicalise case so the SettingsDialog dropdown's
+        // case-sensitive IndexOf("System"/"Dark"/"Light") stays honest after
+        // a hand-edited `ThemeMode=dark`. Unknown values fall back to System.
+        string rawTheme = ReadIni("ThemeMode", "System").Trim();
+        if (string.Equals(rawTheme, "Dark", StringComparison.OrdinalIgnoreCase))
+            ThemeMode = "Dark";
+        else if (string.Equals(rawTheme, "Light", StringComparison.OrdinalIgnoreCase))
+            ThemeMode = "Light";
+        else
+            ThemeMode = "System";
+
         // Persist any v2.1.5 → v2.1.6 bare-hotkey migrations so the next
         // launch reads the already-valid value (and so the user's "change
         // hotkey" flow doesn't revert to the original legacy string).
@@ -241,6 +257,7 @@ internal sealed class Config
         sb.AppendLine("MiddleClickToggle=" + (MiddleClickToggle ? "1" : "0"));
         sb.AppendLine("StartMuted=" + StartMuted);
         sb.AppendLine("LastMuteState=" + (LastMuteState ? "1" : "0"));
+        sb.AppendLine("ThemeMode=" + ThemeMode);
 
         lock (_saveLock)
         {

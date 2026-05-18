@@ -15,9 +15,14 @@ internal sealed class OsdForm : Form
     private bool _disposed;
 
     // Cached GDI resources — created once, reused across the app lifetime.
+    // BG + text follow the user's Theme pin (restart-to-apply, captured at
+    // first class load). Dot colours stay semantic — vivid muted-red and
+    // muted-green that read fine against both Mocha-dark and Latte-light
+    // backgrounds without per-theme tuning. Theme.Initialize MUST fire in
+    // TrayApp's ctor before `new OsdForm()` is called (it does — line 87).
     private static readonly Font s_labelFont = new("Segoe UI", 9f);
-    private static readonly SolidBrush s_bgBrush = new(Color.FromArgb(0x24, 0x24, 0x26));
-    private static readonly SolidBrush s_textBrush = new(Color.FromArgb(0xC8, 0xC8, 0xCC));
+    private static readonly SolidBrush s_bgBrush = new(Theme.BgColor);
+    private static readonly SolidBrush s_textBrush = new(Theme.FgColor);
     private static readonly SolidBrush s_mutedDotBrush = new(Color.FromArgb(0xCC, 0x5A, 0x5A));  // muted red
     private static readonly SolidBrush s_activeDotBrush = new(Color.FromArgb(0x4C, 0xB8, 0x74)); // muted green
 
@@ -42,7 +47,7 @@ internal sealed class OsdForm : Form
         ShowInTaskbar = false;
         TopMost = true;
         StartPosition = FormStartPosition.Manual;
-        BackColor = Color.FromArgb(0x24, 0x24, 0x26);
+        BackColor = Theme.BgColor;
         SetStyle(ControlStyles.SupportsTransparentBackColor, true);
 
         _dismissTimer = new System.Windows.Forms.Timer();

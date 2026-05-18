@@ -64,6 +64,8 @@ internal sealed class UpdateDialog : Form
         MinimizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
         TopMost = true;
+        BackColor = Theme.BgColor;
+        ForeColor = Theme.FgColor;
         // Pin design baseline to 96 DPI BEFORE setting AutoScaleMode so every
         // literal `new Size(...)` / `new Point(...)` below is interpreted as
         // 96-DPI design pixels regardless of which monitor first realizes the
@@ -91,7 +93,7 @@ internal sealed class UpdateDialog : Form
             Text = "",
             Location = new Point(20, 48),
             Size = new Size(370, 20),
-            ForeColor = SystemColors.GrayText,
+            ForeColor = Theme.DimColor,
             Font = _italicFont,
             TextAlign = ContentAlignment.MiddleCenter
         };
@@ -101,7 +103,7 @@ internal sealed class UpdateDialog : Form
         {
             Location = new Point(30, 80),
             Size = new Size(350, 18),
-            BackColor = SystemColors.ControlDark,
+            BackColor = Theme.EditBgColor,
             BorderStyle = BorderStyle.None
         };
         _progressFill = new Panel
@@ -350,7 +352,7 @@ internal sealed class UpdateDialog : Form
         if (isNewer)
         {
             _lblStatus.Text = "A new version is available!";
-            _lblStatus.ForeColor = SystemColors.ControlText;
+            _lblStatus.ForeColor = Theme.FgColor;
             _btnAction.Text = "Upgrade Now";
             _btnAction.Visible = true;
             _btnAction.Location = new Point(145, BtnRowY());
@@ -360,7 +362,7 @@ internal sealed class UpdateDialog : Form
         else
         {
             _lblStatus.Text = "You're on the latest version!";
-            _lblStatus.ForeColor = SystemColors.ControlText;
+            _lblStatus.ForeColor = Theme.FgColor;
             _btnAction.Visible = false;
             _btnCancel.Text = "OK";
             CenterSingleButton(_btnCancel);
@@ -860,7 +862,8 @@ internal sealed class UpdateDialog : Form
                     ShowInTaskbar = false,
                     TopMost = true,
                     StartPosition = FormStartPosition.Manual,
-                    BackColor = Color.FromArgb(240, 240, 240),
+                    BackColor = Theme.BgColor,
+                    ForeColor = Theme.FgColor,
                     AutoSize = true,
                     AutoSizeMode = AutoSizeMode.GrowAndShrink,
                     Padding = new Padding(12, 8, 12, 8)
@@ -870,7 +873,7 @@ internal sealed class UpdateDialog : Form
                     Text = $"\u2705 {AppName} updated to v{version}!",
                     AutoSize = true,
                     Font = toastFont,
-                    ForeColor = Color.FromArgb(30, 30, 30)
+                    ForeColor = Theme.FgColor,
                 };
                 toast.Controls.Add(lbl);
                 toast.FormClosed += (_, _) => toastFont?.Dispose();
@@ -984,6 +987,12 @@ internal sealed class UpdateDialog : Form
         using var stream = File.OpenRead(filePath);
         var hashBytes = SHA256.HashData(stream);
         return Convert.ToHexString(hashBytes).ToLowerInvariant();
+    }
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        Theme.ApplyWindowChrome(this);
     }
 
     protected override void Dispose(bool disposing)

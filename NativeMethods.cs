@@ -53,6 +53,24 @@ internal static class NativeMethods
     public const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
     public const int DWMWCP_ROUND = 2;
 
+    // DWM dark-mode titlebar.
+    //
+    // Attribute 20 = DWMWA_USE_IMMERSIVE_DARK_MODE on Win10 20H1+ (build 19041)
+    // and Win11. On Win10 1809-19H2 (builds 17763-18363) attribute 20 is not
+    // a recognised DWMWA constant - DwmSetWindowAttribute returns E_INVALIDARG.
+    // Callers should call attribute 20 first, check the HRESULT, and only call
+    // attribute 19 on non-S_OK. On pre-1809 Win10 both attributes return
+    // E_INVALIDARG and the form keeps its default light titlebar.
+    public const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
+    public const int DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20H1 = 19;
+
+    // Win11 22000+: custom non-client colours. Pass a COLORREF (BGR-packed
+    // uint as a signed int) via ref to DwmSetWindowAttribute. Pre-Win11 22000
+    // these return E_INVALIDARG and the form keeps default chrome — same
+    // graceful no-op as the dark-mode attributes above.
+    public const int DWMWA_CAPTION_COLOR = 35;   // titlebar background
+    public const int DWMWA_TEXT_COLOR    = 36;   // titlebar text
+
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     public static extern nint FindWindow(string lpClassName, string lpWindowName);
 

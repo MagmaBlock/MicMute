@@ -4,6 +4,19 @@
 
 All notable changes to MicMute are documented here.
 
+## [2.2.0] - 2026-05-17
+
+### Added
+- **Dark / Light / System theme.** New Appearance section in Settings exposes a Theme dropdown (System / Dark / Light). Dark uses the Catppuccin Mocha palette ported from sibling project CapsNumTray; Light restores the v2.1.x "clean white with dark text + brand-blue section headers" identity. System follows the Windows `SystemUsesLightTheme` registry value at startup. The pin applies to every chrome surface — Settings, Help, Update, OSD bubble, tray right-click menu, and tooltips. Tooltips use a custom OwnerDraw renderer so they actually pick up the theme (Win32 ToolTip ignores `BackColor` on the modern visual-styles path). The DWM immersive dark-mode titlebar attribute is set on every dialog so the chrome above the form chrome matches.
+- **Auto-restart on theme change.** Settings → Theme → Apply spawns a replacement process with `--after-theme-restart` and exits the old one. Theme is restart-to-apply by design — static GDI brush fields in `OsdForm` and the new `MenuRenderer` capture the active palette at first class load, so a live swap would leave a mixed-palette window behind. The restart is transparent (~800ms) and a "Theme applied." toast confirms the new instance is up. Re-entry guard prevents rapid double-Apply from spawning two children that race for the single-instance mutex. If `Process.Start` fails (locked exe, AV scan), the user gets a "Theme saved — applies next time you launch MicMute" toast instead of a silent no-op.
+
+### Changed
+- **Settings dialog removed Mute Sound / Unmute Sound rows from Custom Files.** The new Appearance section needed room and the four-cell sound-customization grid was the least-used part of the dialog. The underlying `MuteSound` / `UnmuteSound` config fields are preserved verbatim — power users who already had custom WAVs configured keep them, and `MicMute.ini` still honors the keys for anyone who hand-edits.
+
+### Fixed
+- **GDI brush handle leak in tooltip rendering** (caught pre-ship by the verifier swarm). The new themed ToolTip's `Draw` handler allocated `new SolidBrush(Theme.BgColor)` on every paint without disposal. In a 24/7 tray app, repeatedly hovering the file-row tooltips would leak one GDI handle per paint, eventually exhausting the per-process GDI cap and silently breaking tooltip rendering. Both the brush and the border pen are now in `using` blocks.
+- **Light-mode dropdown borders invisible against the white form.** `FlatStyle.Flat` ComboBoxes have no OS-drawn border, and the light palette's `EditBg = white` matched the form `Bg = white` — the Theme and Mic-mode-on-startup boxes had no visible boundary, just floating text with a dropdown chevron. Both combos are now inset inside a 1px Panel of `DividerColor` that paints the missing frame; works in both light and dark themes without breaking the themed dropdown chrome.
+
 ## [2.1.15] - 2026-05-15
 
 ### Fixed

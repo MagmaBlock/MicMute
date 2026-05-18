@@ -36,17 +36,24 @@ internal static class UiTokens
     public const int CellFileLabelWidth     = 88;    // "Unmute sound" needs a touch more
 
     // ── Colors ──────────────────────────────────────────────────────────
-    public static readonly Color TitleColor     = Color.FromArgb(0x11, 0x11, 0x11);
-    public static readonly Color HeaderColor    = Color.FromArgb(0x22, 0x55, 0xAA);
-    public static readonly Color BodyColor      = Color.FromArgb(0x1E, 0x1E, 0x1E);
-    public static readonly Color LabelColor     = Color.FromArgb(0x44, 0x44, 0x44);
-    public static readonly Color HintColor      = Color.FromArgb(0x88, 0x88, 0x88);
-    public static readonly Color GreyTextColor  = Color.FromArgb(0x99, 0x99, 0x99);
-    public static readonly Color FocusYellow    = Color.FromArgb(0xFF, 0xF8, 0xDC);
-    public static readonly Color ErrorTint      = Color.FromArgb(0xFF, 0xF0, 0xF0);
-    // Progress / status colors used by UpdateDialog (A5-F05).
-    public static readonly Color SuccessGreen   = Color.FromArgb(76, 175, 80);
-    public static readonly Color WarnOrange     = Color.FromArgb(255, 152, 0);
+    // Route through Theme so every dialog auto-themes with the user's
+    // ThemeMode pin. Properties (not fields) so a read returns the active
+    // palette — required because dialogs cache these into control
+    // properties at construction time, AFTER Theme.Initialize fires in
+    // TrayApp's ctor. If you add a hard-coded Color to a dialog, prefer
+    // Theme.* directly so this list stays the single source of truth.
+    public static Color TitleColor     => Theme.FgColor;
+    public static Color HeaderColor    => Theme.AccentBlue;
+    public static Color BodyColor      => Theme.FgColor;
+    public static Color LabelColor     => Theme.FgColor;
+    public static Color HintColor      => Theme.DimColor;
+    public static Color GreyTextColor  => Theme.FgDisabledColor;
+    public static Color FocusYellow    => Theme.FocusTint;
+    public static Color ErrorTint      => Theme.ErrorTint;
+    // Progress / status colors used by UpdateDialog. Green for success
+    // accents (download progress bar fill), Warn for error status text.
+    public static Color SuccessGreen   => Theme.AccentGreen;
+    public static Color WarnOrange     => Theme.AccentWarn;
 
     // ── Fonts ───────────────────────────────────────────────────────────
     public const string PrimaryFont         = "Segoe UI";

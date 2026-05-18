@@ -87,7 +87,8 @@ Right-click the tray icon → ""Mic Source"" to choose which microphone MicMute 
     {
         Text = "MicMute v" + Config.Version + " \u2014 Help";
         TopMost = true;
-        BackColor = Color.White;
+        BackColor = Theme.BgColor;
+        ForeColor = Theme.FgColor;
         ClientSize = new Size(540, 560);
         MinimumSize = new Size(440, 360);
         StartPosition = FormStartPosition.CenterScreen;
@@ -109,7 +110,8 @@ Right-click the tray icon → ""Mic Source"" to choose which microphone MicMute 
         {
             ReadOnly = true,
             BorderStyle = BorderStyle.None,
-            BackColor = Color.White,
+            BackColor = Theme.BgColor,
+            ForeColor = Theme.FgColor,
             ScrollBars = RichTextBoxScrollBars.Vertical,
             DetectUrls = false,
             WordWrap = true,
@@ -197,6 +199,12 @@ Right-click the tray icon → ""Mic Source"" to choose which microphone MicMute 
     protected override void Dispose(bool disposing)
     {
         base.Dispose(disposing);
+    }
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        Theme.ApplyWindowChrome(this);
     }
 
     public static void ShowInstance()

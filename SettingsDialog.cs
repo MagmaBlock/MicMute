@@ -19,6 +19,9 @@ internal sealed class SettingsDialog : Form
     private readonly CheckBox _chkRunAtStartup;
     private readonly ComboBox _ddlStartMuted;
 
+    // Appearance — restart-to-apply theme pin (System / Dark / Light).
+    private readonly ComboBox _ddlTheme;
+
     // Hotkeys — captured values update via the compact-row helper.
     private string _capturedMainHK = "";
     private string _capturedDeafenHK = "";
@@ -37,14 +40,18 @@ internal sealed class SettingsDialog : Form
     // Custom files — paths held as string fields (updated by closure callbacks
     // from AddCompactFileRow). Display TextBoxes named _lbl* show only the
     // filename. No hidden phantom TextBox controls parented to the form.
+    //
+    // Mute / Unmute custom sounds are intentionally NOT exposed in the GUI
+    // (the Custom Files section is dominated by 4 cells worth of empty
+    // "(none)" boxes that almost nobody uses). The Config.MuteSound /
+    // UnmuteSound fields still persist via the INI for power users who want
+    // to hand-edit MicMute.ini — TrayApp.PlayFeedback still honours them.
+    // If we ever bring sound customisation back, restore AddCompactFileRow
+    // calls for them in the Custom Files section.
     private string _pathIconMuted  = "";
     private string _pathIconActive = "";
-    private string _pathMuteSound  = "";
-    private string _pathUnmuteSound = "";
     private readonly TextBox _lblIconMuted;
     private readonly TextBox _lblIconActive;
-    private readonly TextBox _lblMuteSound;
-    private readonly TextBox _lblUnmuteSound;
     private ToolTip _fileRowTooltip;
 
     public SettingsDialog(Config config, Action onApply)
@@ -58,7 +65,8 @@ internal sealed class SettingsDialog : Form
         MaximizeBox = false;
         MinimizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
-        BackColor = Color.White;
+        BackColor = Theme.BgColor;
+        ForeColor = Theme.FgColor;
         // Pin design baseline to 96 DPI BEFORE Font assignment and AutoScaleMode
         // so every literal `new Size(...)` / `new Point(...)` is interpreted as
         // 96-DPI design pixels regardless of which monitor first realizes the
@@ -141,8 +149,14 @@ internal sealed class SettingsDialog : Form
             Text = "On-screen display bubble on mute/unmute",
             AutoSize = true,
             Checked = config.OsdEnabled,
+            ForeColor = Theme.CheckboxFgColor,
+            BackColor = Theme.BgColor,
+            FlatStyle = FlatStyle.Flat,
             Location = new Point(indent, osdRowY),
         };
+        _chkOsd.FlatAppearance.BorderColor = Theme.DividerColor;
+        _chkOsd.FlatAppearance.CheckedBackColor = Theme.HighlightBg;
+        _chkOsd.FlatAppearance.MouseOverBackColor = Theme.HighlightBg;
         Controls.Add(_chkOsd);
 
         _edtOsdDuration = new NumericUpDown
@@ -159,8 +173,23 @@ internal sealed class SettingsDialog : Form
             MinimumSize = new Size(osdDurWidth, 26),
             Location = new Point(osdSectionRight - osdDurWidth, osdRowY - 1),
             TextAlign = HorizontalAlignment.Left,
+            ForeColor = Theme.FgColor,
+            BackColor = Theme.EditBgColor,
+            BorderStyle = BorderStyle.FixedSingle,
         };
         Controls.Add(_edtOsdDuration);
+        // NumericUpDown's inner spinner band (Controls[0]) is an internal
+        // UpDownButtons HWND that paints its own background via ControlPaint
+        // and ignores its parent's BackColor. Without this the digit area is
+        // dark but the up/down arrow strip beside it is system-grey (visible
+        // split). Setting Controls[0].BackColor matches the band to the digit
+        // area; the arrow glyphs stay system-rendered but read fine against
+        // either themed band.
+        if (_edtOsdDuration.Controls.Count > 0)
+        {
+            _edtOsdDuration.Controls[0].BackColor = Theme.EditBgColor;
+            _edtOsdDuration.Controls[0].ForeColor = Theme.FgColor;
+        }
 
         var durLabel = UiFactory.MakeHintLabel("Duration (ms):", 0, osdRowY + 3);
         Controls.Add(durLabel);
@@ -176,8 +205,14 @@ internal sealed class SettingsDialog : Form
             Text = "Mute Lock",
             AutoSize = true,
             Checked = config.MuteLock,
+            ForeColor = Theme.CheckboxFgColor,
+            BackColor = Theme.BgColor,
+            FlatStyle = FlatStyle.Flat,
             Location = new Point(indent, y),
         };
+        _chkMuteLock.FlatAppearance.BorderColor = Theme.DividerColor;
+        _chkMuteLock.FlatAppearance.CheckedBackColor = Theme.HighlightBg;
+        _chkMuteLock.FlatAppearance.MouseOverBackColor = Theme.HighlightBg;
         Controls.Add(_chkMuteLock);
         var muteLockHint = UiFactory.MakeHintLabel(
             "\u2014  reverts external mute changes every 15 seconds (not instant).",
@@ -201,16 +236,51 @@ internal sealed class SettingsDialog : Form
             Text = "Run at startup",
             AutoSize = true,
             Checked = File.Exists(startupPath),
+            ForeColor = Theme.CheckboxFgColor,
+            BackColor = Theme.BgColor,
+            FlatStyle = FlatStyle.Flat,
             Location = new Point(indent, rowY),
         };
+        _chkRunAtStartup.FlatAppearance.BorderColor = Theme.DividerColor;
+        _chkRunAtStartup.FlatAppearance.CheckedBackColor = Theme.HighlightBg;
+        _chkRunAtStartup.FlatAppearance.MouseOverBackColor = Theme.HighlightBg;
         Controls.Add(_chkRunAtStartup);
 
+        // BorderStyle.FixedSingle paints the wrapper's 1px border in the
+        // non-client area — the child ComboBox physically cannot reach NC
+        // pixels (NC paint is OS-handled via WM_NCPAINT, not subject to
+        // child overpaint). Three prior approaches (Panel BackColor padding
+        // trick, BorderPanel.OnPaint rectangle, both with various slack
+        // values) all failed in light mode because Flat-style ComboBox
+        // overpaints its declared Bounds by 1-2px on the bottom row,
+        // erasing any border drawn in client area. NC area is bulletproof.
+        // Same BorderStyle the dialog's TextBoxes already use successfully
+        // for the Hotkey + Custom Files rows. Border colour is the OS
+        // SystemColors.WindowFrame (~#646464) — visible in both palettes
+        // and consistent with the rest of the dialog.
+        var startWrap = new Panel
+        {
+            BorderStyle = BorderStyle.FixedSingle,
+            BackColor = Theme.EditBgColor,
+        };
         _ddlStartMuted = new ComboBox
         {
             DropDownStyle = ComboBoxStyle.DropDownList,
             Width = ddlStartupWidth,
-            Location = new Point(sectionRight - ddlStartupWidth, rowY - 1),
+            Location = new Point(0, 0),       // at panel client-origin
+            ForeColor = Theme.FgColor,
+            BackColor = Theme.EditBgColor,
+            FlatStyle = FlatStyle.Flat,
         };
+        startWrap.Controls.Add(_ddlStartMuted);
+        // Size wrapper = combo + 2 each axis (1px border NC area on each side).
+        // PreferredHeight is the design-time height before AutoScale; close
+        // enough since the wrapper itself scales with the combo.
+        startWrap.Size = new Size(
+            _ddlStartMuted.Width + 2,
+            _ddlStartMuted.PreferredHeight + 2);
+        startWrap.Location = new Point(sectionRight - startWrap.Width, rowY - 1);
+        Controls.Add(startWrap);
         _ddlStartMuted.Items.AddRange(new[] { "Don't change", "Always muted", "Always unmuted", "Remember last" });
         _ddlStartMuted.SelectedIndex = config.StartMuted switch
         {
@@ -219,7 +289,9 @@ internal sealed class SettingsDialog : Form
             "last" => 3,
             _ => 0,
         };
-        Controls.Add(_ddlStartMuted);
+        // _ddlStartMuted is already parented to startWrap above — don't
+        // re-add it to the form (would steal it from the wrapper and lose
+        // the border).
 
         var startLabel = new Label
         {
@@ -228,7 +300,7 @@ internal sealed class SettingsDialog : Form
             Location = new Point(0, rowY + 3),
         };
         Controls.Add(startLabel);
-        startLabel.Left = _ddlStartMuted.Left - startLabel.PreferredWidth - 6;
+        startLabel.Left = startWrap.Left - startLabel.PreferredWidth - 6;
 
         y += 28;
 
@@ -250,10 +322,57 @@ internal sealed class SettingsDialog : Form
             y += 6;
         }
 
-        // ── Custom Files (compact 2×2 grid) ──
-        // Advanced / rarely-used customization section — shrunk to a tight
-        // two-row grid so the dialog isn't dominated by four empty "(none)"
-        // fields. Each cell: label + click-to-browse display + tiny × clear.
+        // ── Appearance ──
+        // Theme pin is restart-to-apply (the GDI brush caches in OsdForm
+        // and MenuRenderer capture Theme.* at first class load). When the
+        // user changes this combo and clicks Apply / Save, TrayApp.
+        // OnSettingsApplied detects the is-dark flip and auto-restarts.
+        AddSectionHeader("Appearance", leftMargin, ref y);
+
+        const int themeRowSectionRight = 504;
+        const int themeDdlWidth = 130;
+        int themeRowY = y;
+
+        var themeLabel = new Label
+        {
+            Text = "Theme:",
+            AutoSize = true,
+            Location = new Point(indent, themeRowY + 3),
+            ForeColor = Theme.FgColor,
+        };
+        Controls.Add(themeLabel);
+
+        // FixedSingle wrapper — same NC-border approach as _ddlStartMuted.
+        var themeWrap = new Panel
+        {
+            BorderStyle = BorderStyle.FixedSingle,
+            BackColor = Theme.EditBgColor,
+        };
+        _ddlTheme = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Width = themeDdlWidth,
+            Location = new Point(0, 0),
+            ForeColor = Theme.FgColor,
+            BackColor = Theme.EditBgColor,
+            FlatStyle = FlatStyle.Flat,
+        };
+        _ddlTheme.Items.AddRange(new object[] { "System", "Dark", "Light" });
+        int themeIdx = _ddlTheme.Items.IndexOf(config.ThemeMode);
+        _ddlTheme.SelectedIndex = themeIdx >= 0 ? themeIdx : 0;
+        themeWrap.Controls.Add(_ddlTheme);
+        themeWrap.Size = new Size(
+            _ddlTheme.Width + 2,
+            _ddlTheme.PreferredHeight + 2);
+        themeWrap.Location = new Point(themeRowSectionRight - themeWrap.Width, themeRowY - 1);
+        Controls.Add(themeWrap);
+
+        y += 34;
+
+        // ── Custom Files (compact 2-cell row) ──
+        // Custom mic icons only — Mute/Unmute sound rows removed in v2.1.x
+        // to make room for the Appearance section above. Power users can
+        // still set MuteSound / UnmuteSound by hand-editing MicMute.ini.
         AddSectionHeader("Custom Files", leftMargin, ref y);
 
         const int sectionInnerLeft = 16;
@@ -265,14 +384,9 @@ internal sealed class SettingsDialog : Form
 
         _pathIconMuted   = config.IconMuted;
         _pathIconActive  = config.IconActive;
-        _pathMuteSound   = config.MuteSound;
-        _pathUnmuteSound = config.UnmuteSound;
 
         _lblIconMuted   = AddCompactFileRow("Muted icon",   () => _pathIconMuted,   v => _pathIconMuted   = v, "Icon files (*.ico)|*.ico",  col1X, y, cellW);
         _lblIconActive  = AddCompactFileRow("Active icon",  () => _pathIconActive,  v => _pathIconActive  = v, "Icon files (*.ico)|*.ico",  col2X, y, cellW);
-        y += 26;
-        _lblMuteSound   = AddCompactFileRow("Mute sound",   () => _pathMuteSound,   v => _pathMuteSound   = v, "Sound files (*.wav)|*.wav", col1X, y, cellW);
-        _lblUnmuteSound = AddCompactFileRow("Unmute sound", () => _pathUnmuteSound, v => _pathUnmuteSound = v, "Sound files (*.wav)|*.wav", col2X, y, cellW);
         y += 26;
 
         // ── Buttons ──
@@ -280,46 +394,46 @@ internal sealed class SettingsDialog : Form
         const int dialogWidth = 520;
         int rightEdge = dialogWidth - leftMargin;
 
-        // Auxiliary links (left) — subtle, navigation-style
-        var lnkGitHub = new LinkLabel
+        // Auxiliary links (left) — subtle, navigation-style. Link / active /
+        // visited all use Theme.AccentBlue so the colour stays consistent
+        // across light + dark palettes and the post-click "visited purple"
+        // default doesn't clash with our accent.
+        LinkLabel MakeNavLink(string text, int x, LinkLabelLinkClickedEventHandler onClick)
         {
-            Text = "GitHub",
-            AutoSize = true,
-            Location = new Point(leftMargin, y + 6),
-            LinkBehavior = LinkBehavior.HoverUnderline,
-        };
-        lnkGitHub.LinkClicked += (_, _) =>
+            var lnk = new LinkLabel
+            {
+                Text = text,
+                AutoSize = true,
+                Location = new Point(x, y + 6),
+                LinkBehavior = LinkBehavior.HoverUnderline,
+                BackColor = Theme.BgColor,
+                LinkColor = Theme.AccentBlue,
+                ActiveLinkColor = Theme.AccentBlue,
+                VisitedLinkColor = Theme.AccentBlue,
+                DisabledLinkColor = Theme.FgDisabledColor,
+            };
+            lnk.LinkClicked += onClick;
+            return lnk;
+        }
+
+        var lnkGitHub = MakeNavLink("GitHub", leftMargin, (_, _) =>
         {
             using var proc = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
             {
                 FileName = "https://github.com/itsnateai/MicMute",
                 UseShellExecute = true,
             });
-        };
+        });
         Controls.Add(lnkGitHub);
 
-        var lnkHelp = new LinkLabel
-        {
-            Text = "Help",
-            AutoSize = true,
-            Location = new Point(lnkGitHub.Right + 14, y + 6),
-            LinkBehavior = LinkBehavior.HoverUnderline,
-        };
-        lnkHelp.LinkClicked += (_, _) => HelpWindow.ShowInstance();
+        var lnkHelp = MakeNavLink("Help", lnkGitHub.Right + 14, (_, _) => HelpWindow.ShowInstance());
         Controls.Add(lnkHelp);
 
-        var lnkUpdate = new LinkLabel
-        {
-            Text = "Check for updates",
-            AutoSize = true,
-            Location = new Point(lnkHelp.Right + 14, y + 6),
-            LinkBehavior = LinkBehavior.HoverUnderline,
-        };
-        lnkUpdate.LinkClicked += (_, _) =>
+        var lnkUpdate = MakeNavLink("Check for updates", lnkHelp.Right + 14, (_, _) =>
         {
             using var dlg = new UpdateDialog();
             dlg.ShowDialog(this);
-        };
+        });
         Controls.Add(lnkUpdate);
 
         // Action buttons (right) — anchored to the right edge via the shared
@@ -403,10 +517,14 @@ internal sealed class SettingsDialog : Form
         // SanitizePath is belt-and-braces here: ValidateCustomFile already rejects
         // UNC at file-pick, but Save-time sanitization keeps Config the single
         // source of truth so any future textbox-paste path stays defended.
+        // MuteSound / UnmuteSound are NOT touched here — the GUI was removed
+        // for them, so we leave whatever the user set via hand-edited INI.
         _config.IconMuted = Config.SanitizePath((_pathIconMuted ?? "").Trim());
         _config.IconActive = Config.SanitizePath((_pathIconActive ?? "").Trim());
-        _config.MuteSound = Config.SanitizePath((_pathMuteSound ?? "").Trim());
-        _config.UnmuteSound = Config.SanitizePath((_pathUnmuteSound ?? "").Trim());
+
+        // Appearance — theme pin is restart-to-apply; TrayApp.OnSettingsApplied
+        // detects the is-dark flip post-Save and spawns a replacement process.
+        _config.ThemeMode = (_ddlTheme.SelectedItem as string) ?? "System";
 
         bool saved = _config.Save();
         _onApply();
@@ -580,12 +698,13 @@ internal sealed class SettingsDialog : Form
         Controls.Add(label);
         y += label.Height + 3;
 
-        // Separator line — extends to near the right margin so the section
-        // header visually spans the dialog's content width (was 410, leaving
-        // ~70px of dead space on the right).
-        var sep = new Label
+        // Separator line — flat 1-px Theme.DividerColor band instead of the
+        // OS Fixed3D etch (Fixed3D ignores BackColor and renders as a 3D
+        // groove that reads as an unintended bevel against the themed Bg).
+        var sep = new Panel
         {
-            BorderStyle = BorderStyle.Fixed3D,
+            BackColor = Theme.DividerColor,
+            BorderStyle = BorderStyle.None,
             Height = 1,
             Width = 488,
             Location = new Point(x, y),
@@ -601,8 +720,22 @@ internal sealed class SettingsDialog : Form
             Text = text,
             AutoSize = true,
             Checked = isChecked,
+            // Dark mode: the body Fg (#CDD6F3) renders thin against the dark Bg
+            // at 9.5pt through FlatStyle.Flat's grayscale-AA path — Theme.CheckboxFgColor
+            // returns pure white in dark mode and the normal Fg in light mode.
+            ForeColor = Theme.CheckboxFgColor,
+            BackColor = Theme.BgColor,
+            // FlatStyle.Flat switches CheckBox to a render path that respects
+            // ForeColor for the tick glyph. Default Standard uses VisualStyles
+            // which renders a light-themed glyph regardless of ForeColor and
+            // draws the focus rect via ControlPaint.DrawFocusRectangle (XORs
+            // against SystemColors.ControlText — invisible on dark Bg).
+            FlatStyle = FlatStyle.Flat,
             Location = new Point(x, y),
         };
+        chk.FlatAppearance.BorderColor = Theme.DividerColor;
+        chk.FlatAppearance.CheckedBackColor = Theme.HighlightBg;
+        chk.FlatAppearance.MouseOverBackColor = Theme.HighlightBg;
         Controls.Add(chk);
         y += chk.Height + 4;
         return chk;
@@ -639,7 +772,9 @@ internal sealed class SettingsDialog : Form
         var display = new TextBox
         {
             ReadOnly = true,
-            BackColor = Color.White,
+            BackColor = Theme.EditBgColor,
+            ForeColor = Theme.FgColor,
+            BorderStyle = BorderStyle.FixedSingle,
             Cursor = Cursors.Hand,
             Width = dispW,
             Location = new Point(dispX, y - 1),
@@ -649,7 +784,7 @@ internal sealed class SettingsDialog : Form
         var btnClear = UiFactory.MakeIconButton("\u00D7", clearX, y - 1);
         Controls.Add(btnClear);
 
-        _fileRowTooltip ??= new ToolTip();
+        _fileRowTooltip ??= UiFactory.MakeThemedToolTip();
         _fileRowTooltip.SetToolTip(btnClear, "Clear hotkey");
         _fileRowTooltip.SetToolTip(display, "Click and press a key combo to record");
 
@@ -662,8 +797,8 @@ internal sealed class SettingsDialog : Form
             bool empty = string.IsNullOrEmpty(v);
             string readable = empty ? "(not set)" : Config.HotkeyToReadable(v);
             display.Text = readable;
-            display.ForeColor = empty ? UiTokens.GreyTextColor : Color.Black;
-            display.BackColor = captureMode ? UiTokens.FocusYellow : Color.White;
+            display.ForeColor = empty ? UiTokens.GreyTextColor : Theme.FgColor;
+            display.BackColor = captureMode ? UiTokens.FocusYellow : Theme.EditBgColor;
             btnClear.Enabled = !empty;
         }
         Refresh();
@@ -845,9 +980,10 @@ internal sealed class SettingsDialog : Form
         {
             Text = FileLabel(getPath()),
             ReadOnly = true,
-            BackColor = Color.White,
+            BackColor = Theme.EditBgColor,
+            BorderStyle = BorderStyle.FixedSingle,
             Cursor = Cursors.Hand,
-            ForeColor = hasFile ? Color.Black : UiTokens.GreyTextColor,
+            ForeColor = hasFile ? Theme.FgColor : UiTokens.GreyTextColor,
             Width = dispW,
             Location = new Point(dispX, y - 1),
         };
@@ -859,7 +995,7 @@ internal sealed class SettingsDialog : Form
         // for-pixel (both sit inline with a TextBox, both use BtnIconHeight=23).
         var btnClear = UiFactory.MakeIconButton("\u00D7", clearX, y - 1);
         btnClear.Enabled = hasFile;
-        _fileRowTooltip ??= new ToolTip();
+        _fileRowTooltip ??= UiFactory.MakeThemedToolTip();
         _fileRowTooltip.SetToolTip(btnClear, "Reset to default");
         _fileRowTooltip.SetToolTip(fileDisplay, "Click to choose a custom file");
         Controls.Add(btnClear);
@@ -889,7 +1025,7 @@ internal sealed class SettingsDialog : Form
 
             setPath(ofd.FileName);
             fileDisplay.Text = FileLabel(ofd.FileName);
-            fileDisplay.ForeColor = Color.Black;
+            fileDisplay.ForeColor = Theme.FgColor;
             btnClear.Enabled = true;
         }
 
@@ -1061,6 +1197,12 @@ internal sealed class SettingsDialog : Form
         }
 
         return (false, null);
+    }
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        Theme.ApplyWindowChrome(this);
     }
 
     /// <summary>

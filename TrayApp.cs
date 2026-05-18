@@ -50,6 +50,11 @@ internal sealed class TrayApp : Form
     // Reusable bold font for menu title (disposed in cleanup)
     private Font _menuTitleFont;
 
+    // Themed renderer for the tray context menu (and its submenu drop-downs).
+    // Created once in the ctor after Theme.Initialize fires so its static GDI
+    // brush cache captures the right palette.
+    private MenuRenderer _menuRenderer;
+
     // One-shot set — we log a custom-sound failure once per file path so a
     // broken MuteSound doesn't spam the log on every toggle.
     private readonly HashSet<string> _playSoundFailed = new(StringComparer.OrdinalIgnoreCase);
@@ -82,6 +87,13 @@ internal sealed class TrayApp : Form
 
         _config = new Config();
         _config.Load();
+
+        // Lock in the window-chrome theme BEFORE any class with a static GDI
+        // capture is first touched — OsdForm, MenuRenderer, and any future
+        // renderer reads Theme.* at first class load. Restart-to-apply: the
+        // GDI caches can't be invalidated without a process restart, so the
+        // Settings dialog auto-restarts when the user changes this pin.
+        Theme.Initialize(Theme.ResolveIsDark(_config.ThemeMode));
 
         _audio = new AudioManager();
 
@@ -116,7 +128,13 @@ internal sealed class TrayApp : Form
             currentExePath: Application.ExecutablePath);
         var trayBaseline = TrayIconPromoter.CaptureBaseline();
 
-        _trayMenu = new ContextMenuStrip();
+        _menuRenderer = new MenuRenderer();
+        _trayMenu = new ContextMenuStrip
+        {
+            Renderer = _menuRenderer,
+            BackColor = Theme.BgColor,
+            ForeColor = Theme.FgColor,
+        };
         _trayIcon = new NotifyIcon
         {
             Text = "MicMute",   // seed for NIF_TIP — overwritten by SyncTrayIcon below
@@ -196,6 +214,24 @@ internal sealed class TrayApp : Form
                 ShowTimedTooltip(
                     "Custom icon couldn't load — using built-in icon.\nCheck the path in Settings.", 5000)));
         }
+
+        // --after-theme-restart: dispatched by TrayApp.TryAutoRestartForTheme
+        // in the outgoing process. Defer a confirmation toast by ~800ms so it
+        // lands after the OSD's first paint and after the tray icon has had a
+        // moment to materialize — the user clicked Apply on a theme change and
+        // would otherwise just see their Settings dialog vanish.
+        if (Environment.GetCommandLineArgs().Contains("--after-theme-restart"))
+        {
+            var themeToastTimer = new System.Windows.Forms.Timer { Interval = 800 };
+            themeToastTimer.Tick += (_, _) =>
+            {
+                themeToastTimer.Stop();
+                themeToastTimer.Dispose();
+                if (_disposed || IsDisposed) return;
+                ShowTimedTooltip("Theme applied.", 2000);
+            };
+            themeToastTimer.Start();
+        }
     }
 
     // BUG-002 / A2-F02: re-initialise audio on resume from sleep/hibernate.
@@ -269,6 +305,7 @@ internal sealed class TrayApp : Form
         try { if (_trayIcon != null) { _trayIcon.Visible = false; _trayIcon.Dispose(); } } catch { }
         try { DisposeMenuItems(); _trayMenu?.Dispose(); } catch { }
         try { _menuTitleFont?.Dispose(); } catch { }
+        // _menuRenderer holds only static GDI — no instance state to dispose.
         try { DisposeIcons(); } catch { }
         try { _audio?.Dispose(); } catch { }
         try { _settingsDialog?.Dispose(); } catch { }
@@ -1210,6 +1247,11 @@ internal sealed class TrayApp : Form
         // Mode submenu
         string modeLabel = "Mode: " + (_config.Mode == "push-to-talk" ? "Push-to-Talk" : "Toggle");
         var modeItem = new ToolStripMenuItem(modeLabel);
+        // Submenu drop-down is a separate ToolStripDropDown \u2014 give it
+        // matching chrome so it inherits BackColor/ForeColor when the
+        // renderer's color table is queried for paths we don't override
+        // (drop shadow, scroll arrows on long submenus).
+        ThemeDropDown(modeItem);
         var toggleModeItem = new ToolStripMenuItem("Toggle");
         toggleModeItem.Checked = _config.Mode == "toggle";
         toggleModeItem.Click += (_, _) => SetMode("toggle");
@@ -1222,6 +1264,7 @@ internal sealed class TrayApp : Form
 
         // Device submenu (lazy-loaded)
         _deviceMenuItem = new ToolStripMenuItem("Mic Source");
+        ThemeDropDown(_deviceMenuItem);
         var loadingItem = new ToolStripMenuItem("Loading\u2026") { Enabled = false };
         _deviceMenuItem.DropDownItems.Add(loadingItem);
         _deviceMenuItem.DropDownOpening += OnDeviceMenuOpening;
@@ -1271,6 +1314,17 @@ internal sealed class TrayApp : Form
         var exitItem = new ToolStripMenuItem("Exit");
         exitItem.Click += (_, _) => ExitApplication();
         _trayMenu.Items.Add(exitItem);
+    }
+
+    /// <summary>
+    /// Match a submenu drop-down to the parent menu's chrome so it inherits
+    /// theme colours for paint paths the renderer doesn't override (shadow
+    /// edge, scroll arrows on long submenus).
+    /// </summary>
+    private static void ThemeDropDown(ToolStripMenuItem item)
+    {
+        item.DropDown.BackColor = Theme.BgColor;
+        item.DropDown.ForeColor = Theme.FgColor;
     }
 
     /// <summary>
@@ -1432,8 +1486,43 @@ internal sealed class TrayApp : Form
         _settingsDialog.Show();
     }
 
+    // Re-entry guard: rapid Apply→Save (or Apply→Apply) clicks would
+    // otherwise spawn two children racing for the single-instance mutex.
+    // Set once we commit to spawning; never cleared because we're exiting.
+    private bool _themeRestartInFlight;
+
     private void OnSettingsApplied()
     {
+        // Theme is restart-to-apply (static GDI caches in OsdForm and
+        // MenuRenderer captured Theme.* at first class load and can't be
+        // invalidated without a process restart). If the new pref resolves
+        // to a different is-dark than the one we booted with, auto-restart
+        // so the user doesn't have to. All other settings stay instant-apply.
+        bool newIsDark = Theme.ResolveIsDark(_config.ThemeMode);
+        if (newIsDark != Theme.IsDark && !_themeRestartInFlight)
+        {
+            _themeRestartInFlight = true;
+            if (TryAutoRestartForTheme())
+            {
+                // Replacement process has been launched; we're about to exit.
+                // Skip the rest of OnSettingsApplied — the new instance will
+                // re-load icons, re-register hotkeys, and rebuild the menu
+                // from its own ctor with the new theme.
+                return;
+            }
+            // Spawn failed (locked exe, AV scan, missing path) — INI was
+            // already written with the new theme, so the next manual launch
+            // will pick it up. Surface a toast so the user understands the
+            // theme didn't visibly change THIS session and they need to
+            // restart. Without this the user sees Settings close + no
+            // visible theme change + nothing in the log they can read.
+            _themeRestartInFlight = false;
+            ShowTimedTooltip(
+                "Theme saved — applies next time you launch MicMute.\n" +
+                "(Auto-restart didn't fire — restart manually to see it now.)",
+                5000);
+        }
+
         // Any Apply path that touches hotkey config invalidates sticky PTT —
         // RegisterMainHotkey below will restart polling from a clean state.
         ClearStickyPttOverride();
@@ -1466,6 +1555,47 @@ internal sealed class TrayApp : Form
         _tooltipDirty = true;
         BuildTrayMenu();
         SetTrayIcon();
+    }
+
+    /// <summary>
+    /// Spawn a replacement MicMute.exe with --after-theme-restart, then call
+    /// Application.Exit on success. ApplySettings has already persisted the
+    /// new ThemeMode by the time this is called, so the replacement process
+    /// loads it on startup and Theme.Initialize picks up the new palette.
+    ///
+    /// Order matters: spawn BEFORE exit. If Process.Start throws (locked exe,
+    /// AV scan, missing path), return false and fall back to the manual-restart
+    /// OSD — the user is never left without a tray.
+    /// </summary>
+    private static bool TryAutoRestartForTheme()
+    {
+        var exePath = Environment.ProcessPath;
+        if (string.IsNullOrEmpty(exePath))
+        {
+            Log.Warn("MicMute: theme auto-restart skipped — Environment.ProcessPath was null/empty");
+            return false;
+        }
+        try
+        {
+            // nosemgrep: gitlab.security_code_scan.SCS0001-1 -- exePath is Environment.ProcessPath (our own executable, not user-supplied)
+            using var p = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(exePath)
+            {
+                Arguments = "--after-theme-restart",
+                UseShellExecute = true,
+            });
+            if (p == null)
+            {
+                Log.Warn("MicMute: theme auto-restart — Process.Start returned null; staying open for manual restart");
+                return false;
+            }
+            Application.Exit();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"MicMute: theme auto-restart failed ({ex.GetType().Name}: {ex.Message}) — staying open for manual restart");
+            return false;
+        }
     }
 
     // ── Tray Click Handling ──────────────────────────────────────────────
@@ -1646,6 +1776,10 @@ internal sealed class TrayApp : Form
             try { DisposeMenuItems(); } catch { }
             try { _trayMenu?.Dispose(); } catch { }
             try { _menuTitleFont?.Dispose(); } catch { }
+            // MenuRenderer holds only static GDI brushes — process-lifetime
+            // caches, Win32 reclaims handles on process exit. No explicit
+            // dispose needed. If the renderer ever grows instance GDI state,
+            // make it IDisposable and add the dispose call here.
 
             // Dispose icons
             try { DisposeIcons(); } catch { }
