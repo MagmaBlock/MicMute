@@ -52,6 +52,19 @@ internal static class UiFactory
     /// doesn't stick out below the field. FlatStyle=Flat + TabStop=false
     /// since these are accessory buttons; primary keyboard path is
     /// Enter/Space on the adjacent display field.
+    ///
+    /// Dark-mode contrast (user report 2026-05-18):
+    /// - BackColor matches the adjacent TextBox (EditBg) so the button reads
+    ///   as part of the same input strip instead of floating in the form Bg
+    ///   with a near-invisible border.
+    /// - Border uses <see cref="Theme.IconButtonBorder"/> (brighter than
+    ///   Divider) so the small 22×23 outline registers against the form Bg.
+    /// - Disabled-state glyph is repainted via the Paint event using
+    ///   <see cref="Theme.FgDisabledColor"/>. FlatStyle.Flat's built-in
+    ///   disabled renderer falls back to a system grey that's near-invisible
+    ///   on the dark Mocha Bg — the explicit override keeps the × readable
+    ///   in both palettes whether the button is enabled (active hotkey /
+    ///   custom file set) or disabled (default state, nothing to clear).
     /// </summary>
     public static Button MakeIconButton(string glyph, int x, int y)
     {
@@ -63,13 +76,31 @@ internal static class UiFactory
             AutoSize = false,
             FlatStyle = FlatStyle.Flat,
             ForeColor = Theme.FgColor,
-            BackColor = Theme.BgColor,
+            BackColor = Theme.EditBgColor,
             TabStop = false,
             Location = new Point(x, y),
         };
-        btn.FlatAppearance.BorderColor = Theme.DividerColor;
+        btn.FlatAppearance.BorderColor = Theme.IconButtonBorder;
         btn.FlatAppearance.MouseOverBackColor = Theme.HighlightBg;
-        btn.FlatAppearance.MouseDownBackColor = Theme.EditBgColor;
+        btn.FlatAppearance.MouseDownBackColor = Theme.BgColor;
+
+        // Disabled-state override. FlatStyle.Flat's OnPaint already drew the
+        // background + border + grey glyph; we just overpaint the glyph in
+        // our explicit FgDisabled token. Inset by 1px so the FlatAppearance
+        // border stays intact.
+        btn.Paint += (s, e) =>
+        {
+            if (btn.Enabled) return;
+            var inner = new Rectangle(1, 1, btn.Width - 2, btn.Height - 2);
+            using var bgBrush = new SolidBrush(btn.BackColor);
+            e.Graphics.FillRectangle(bgBrush, inner);
+            TextRenderer.DrawText(
+                e.Graphics, btn.Text, btn.Font, btn.ClientRectangle,
+                Theme.FgDisabledColor,
+                TextFormatFlags.HorizontalCenter
+                | TextFormatFlags.VerticalCenter
+                | TextFormatFlags.NoPrefix);
+        };
         return btn;
     }
 

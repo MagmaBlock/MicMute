@@ -172,6 +172,22 @@ internal static class Theme
     /// BorderStyle.FixedSingle paints around the dialog's TextBoxes.
     /// </summary>
     public static System.Drawing.Color InputBorder    => _isDark ? Dark.Divider    : Light.InputBorder;
+
+    /// <summary>
+    /// Outline colour for inline icon buttons (× clear in hotkey + custom-file
+    /// rows). Brighter than <see cref="DividerColor"/> so the 22×23 button
+    /// reads as a clearly delimited control against the form Bg — Divider is
+    /// tuned for soft section rules and (user report 2026-05-18) reads as
+    /// "no border" on the icon buttons in dark mode because the 30-unit
+    /// channel jump from Bg #1E1E2E to Divider #404050 is below the threshold
+    /// where the eye picks out a 1px outline at typical viewing distance. The
+    /// 80-unit jump from Bg to FgDisabled #808095 reads as a clearly bounded
+    /// rectangle. Light mode keeps the same neutral grey as the section
+    /// rule — the white form Bg + dark glyph already give the control a
+    /// strong silhouette, so a brighter border would feel overwrought.
+    /// </summary>
+    public static System.Drawing.Color IconButtonBorder => _isDark ? Dark.FgDisabled : Light.Divider;
+
     public static System.Drawing.Color AccentBlue      => _isDark ? Dark.AccentBlue : Light.AccentBlue;
 
     /// <summary>
@@ -233,9 +249,10 @@ internal static class Theme
     // ── Light palette — restored "original MicMute" feel ───────────────────
     // The first port used Catppuccin Latte (cool grey-blue tint) which was
     // visually wrong against MicMute's v2.1.x identity (clean white with dark
-    // text + the brand-blue accent #2255AA from the section headers). Nate's
-    // feedback was "doesn't look like our original version and kind of hurts
-    // the eyeballs." This palette restores the original tokens
+    // text + the brand-blue accent #2255AA from the section headers). The
+    // Latte port "doesn't look like the original version and hurts the
+    // eyeballs" (paraphrased from review feedback). This palette restores
+    // the original tokens
     // (TitleColor/HeaderColor/BodyColor/LabelColor/HintColor) one-for-one and
     // fills in the slots Latte added (HighlightBg/EditBg/Divider) with neutral
     // greys that sit calmly against pure white.
@@ -250,7 +267,7 @@ internal static class Theme
         public static readonly System.Drawing.Color Divider     = System.Drawing.Color.FromArgb(0xCC, 0xCC, 0xCC); // light grey separator (section rules — subtle by design)
         // Was #A0A0A0 (ControlDark match) but a 1px line of that grey
         // sandwiched between a white combo interior and a white form Bg
-        // failed to register at 1px on Nate's monitor in light mode while
+        // failed to register at 1px in light mode on the test display while
         // dark mode (40-unit channel diff) was clearly visible. Dropped to
         // #606060 — closer to ControlDarkDark — for a 160-unit channel jump
         // against white. Still neutral, no chromatic tint.

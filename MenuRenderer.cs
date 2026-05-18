@@ -76,7 +76,7 @@ internal sealed class MenuRenderer : ToolStripProfessionalRenderer
         var rect = new Rectangle(Point.Empty, e.Item.Size);
         // Title row: solid soft-blue wash (cached static brush). No
         // gradient — tried 22%/60%/40% with various stops; 40% solid is
-        // the one Nate signed off on.
+        // the one that landed after review.
         if (e.Item.Tag is string tag && tag == TitleItemTag)
         {
             e.Graphics.FillRectangle(TitleTintBrush, rect);

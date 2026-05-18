@@ -146,8 +146,18 @@ internal sealed class SettingsDialog : Form
         // The .Height + 2 advance below uses the post-wrap Height so the
         // next row gets the right vertical baseline whether the label fits
         // on one line or wraps to two.
+        // v2.2.7: explicit "\n" hard break instead of relying on
+        // AutoSize+MaximumSize wrap. The v2.2.6 MaximumSize-only path
+        // didn't reliably trigger wrap at 125% DPI — likely because
+        // Windows accessibility text-scaling stacked on top of monitor
+        // DPI scales the font width without scaling MaximumSize by the
+        // same ratio, so the label measured as fitting on one line at
+        // the form's CurrentAutoScaleDimensions but rendered wider than
+        // the dialog at draw time. A literal "\n" in the source string
+        // sidesteps every measurement quirk because the wrap is in the
+        // data, not the layout pass.
         var toggleHint = UiFactory.MakeHintLabel(
-            "Toggle Mute: mutes / unmutes your mic. In Push-to-Talk mode, hold to talk.",
+            "Toggle Mute: mutes / unmutes your mic.\nIn Push-to-Talk mode, hold to talk.",
             indent, y);
         toggleHint.MaximumSize = new Size(UiTokens.SettingsSectionRight - indent, 0);
         Controls.Add(toggleHint);
@@ -446,17 +456,26 @@ internal sealed class SettingsDialog : Form
         const int dialogWidth = UiTokens.SettingsDialogWidth;
         int rightEdge = dialogWidth - leftMargin;
 
-        // Auxiliary links (left) — subtle, navigation-style. Link / active /
+        // Auxiliary links — subtle, navigation-style. Link / active /
         // visited all use Theme.AccentBlue so the colour stays consistent
         // across light + dark palettes and the post-click "visited purple"
         // default doesn't clash with our accent.
-        LinkLabel MakeNavLink(string text, int x, LinkLabelLinkClickedEventHandler onClick)
+        //
+        // v2.2.7: parameterized Y so the links can live on their own row
+        // ABOVE the action buttons instead of sharing the row at `y`. The
+        // previous shared-row layout (links left, buttons right) collided
+        // at 125% DPI because lnkUpdate.PreferredWidth measures at live-
+        // monitor DPI while btnOK.Left was design-space — the v2.2.4
+        // cascade-hide guard was hiding "Check for updates" entirely
+        // instead. Separate rows take the collision off the table
+        // regardless of DPI or accessibility text-scaling.
+        LinkLabel MakeNavLink(string text, int x, int linkY, LinkLabelLinkClickedEventHandler onClick)
         {
             var lnk = new LinkLabel
             {
                 Text = text,
                 AutoSize = true,
-                Location = new Point(x, y + 6),
+                Location = new Point(x, linkY),
                 LinkBehavior = LinkBehavior.HoverUnderline,
                 BackColor = Theme.BgColor,
                 LinkColor = Theme.AccentBlue,
@@ -468,7 +487,11 @@ internal sealed class SettingsDialog : Form
             return lnk;
         }
 
-        var lnkGitHub = MakeNavLink("GitHub", leftMargin, (_, _) =>
+        // Links live on their own row above the action buttons. linkRowY is
+        // the baseline for all three links; we advance `y` past the link row
+        // before placing the button row so the two never overlap.
+        int linkRowY = y;
+        var lnkGitHub = MakeNavLink("GitHub", leftMargin, linkRowY, (_, _) =>
         {
             // Process.Start with UseShellExecute=true throws when no default
             // browser is registered, the URL is blocked by Group Policy, or
@@ -506,15 +529,25 @@ internal sealed class SettingsDialog : Form
         });
         Controls.Add(lnkGitHub);
 
-        var lnkHelp = MakeNavLink("Help", lnkGitHub.Right + 14, (_, _) => HelpWindow.ShowInstance());
+        var lnkHelp = MakeNavLink("Help", lnkGitHub.Right + 14, linkRowY, (_, _) => HelpWindow.ShowInstance());
         Controls.Add(lnkHelp);
 
-        var lnkUpdate = MakeNavLink("Check for updates", lnkHelp.Right + 14, (_, _) =>
+        var lnkUpdate = MakeNavLink("Check for updates", lnkHelp.Right + 14, linkRowY, (_, _) =>
         {
             using var dlg = new UpdateDialog();
             dlg.ShowDialog(this);
         });
         Controls.Add(lnkUpdate);
+
+        // Advance past the link row before laying out the button row. Use
+        // the tallest link's measured Height (PreferredHeight, since the
+        // links are AutoSize=true) plus a small gap so the visual
+        // separation reads as "two related rows" rather than a single
+        // squished block. 8px at design-DPI ≈ 10px at 125%, ~12px at 150%.
+        int linkRowHeight = System.Math.Max(
+            System.Math.Max(lnkGitHub.PreferredHeight, lnkHelp.PreferredHeight),
+            lnkUpdate.PreferredHeight);
+        y += linkRowHeight + 8;
 
         // Action buttons (right) — anchored to the right edge via the shared
         // UiFactory so they match Hotkey dialog + any future dialog pixel-perfect.
@@ -550,34 +583,20 @@ internal sealed class SettingsDialog : Form
         Controls.Add(btnOK);
         AcceptButton = btnOK;
 
-        // Defensive overlap guard — protects against accessibility text-size
-        // override (Settings → Accessibility → Text size, independent of
-        // display DPI) and any future locale where "Check for updates"
-        // measures wider than its design-space footprint. AutoSize
-        // LinkLabels measure at the live monitor DPI / font-scale, not the
-        // 96-DPI design pin, so a >175% text scale or a long-form locale
-        // string can push lnkUpdate.Right past btnOK.Left. The pre-v2.2.2
-        // shrink-math caught this by clipping the buttons (visible failure);
-        // the fixed-width refactor would otherwise paint labels UNDER the
-        // buttons (invisible failure). Hide the rightmost link when it
-        // would collide — the user can still reach update check via the
-        // tray menu and self-update auto-prompts.
-        // Cascade-hide rightmost-first: lnkUpdate is the longest label, so it
-        // collides first; lnkHelp is checked second to cover the (rare)
-        // extreme-text-scale case where hiding Update alone isn't enough.
-        // lnkGitHub is the anchor at leftMargin and is never hidden — if it
-        // were to collide, the dialog layout itself would be unusable and a
-        // wider-dialog refactor would be the right answer, not a hide.
-        if (lnkUpdate.Right > btnOK.Left - UiTokens.BtnGap)
-            lnkUpdate.Visible = false;
-        if (lnkHelp.Right > btnOK.Left - UiTokens.BtnGap)
-            lnkHelp.Visible = false;
+        // v2.2.7: removed the cascade-hide overlap guard. With links on a
+        // dedicated row above the buttons (see linkRowY above), there is
+        // no horizontal axis on which they can collide with the action
+        // buttons — accessibility text-scaling can stretch the link group
+        // arbitrarily wide without affecting the button row's layout.
+        // 125% DPI users on v2.2.6 reported "Check for updates" disappearing
+        // entirely because the v2.2.4 guard was hiding it; the structural
+        // fix removes the need for the guard.
 
         // Footer clearance — empirically tuned to comfortable spacing at
-        // 100% (Nate's Asus) AND 125%/150% (Suzy's laptop). v2.2.4 used
-        // `y + BtnHeight + DialogMargin` (= y + 44 design = ~20px native gap
-        // at 125% DPI); Suzy reported the Apply/Cancel row still felt
-        // smooshed at her scale. v2.2.6 adds an extra ColumnGap (12 design)
+        // 100% AND 125%/150% DPI. v2.2.4 used `y + BtnHeight + DialogMargin`
+        // (= y + 44 design = ~20px native gap at 125% DPI); user reports
+        // at 125% indicated the Apply/Cancel row still felt smooshed at
+        // that scale. v2.2.6 adds an extra ColumnGap (12 design)
         // for ~30 native px at 125% / ~36 at 150%, which reads comfortable
         // without making the dialog look top-heavy at 100%.
         ClientSize = new Size(dialogWidth,
