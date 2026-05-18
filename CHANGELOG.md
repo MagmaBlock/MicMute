@@ -4,6 +4,15 @@
 
 All notable changes to MicMute are documented here.
 
+## [2.2.4] - 2026-05-18
+
+### Fixed
+- **Settings dialog hardening — round 2.** Four issues caught by the v2.2.3 verifier swarm, each with Sonnet+Opus convergence (the kind worth fixing):
+  - **`FindStringExact(null)` crashed the dialog ctor.** v2.2.3 swapped `IndexOf` (which tolerated null) for `FindStringExact` (which throws `ArgumentNullException`). If `MicMute.ini` were missing the `ThemeMode` key or a corrupt-INI recovery returned null, opening Settings would crash. Added a `string.IsNullOrEmpty` short-circuit that maps null/empty to the System theme fallback.
+  - **`rejectTimer` Tick race vs `Dispose` + Escape-cancel.** The 1800ms reject-animation Tick handler had three races, all addressed by a single rewrite: (1) if the dialog closed while a `WM_TIMER` was queued, the Tick would call `Stop` on a disposed timer and throw `ObjectDisposedException` into the WinForms thread-exception pump; (2) if the user pressed Escape during the 1.8s animation, the Tick still restored `BackColor = FocusYellow` after `CancelCapture` re-painted, leaving the row stuck in capture-mode yellow; (3) if the display TextBox was disposed between captureMode set and Tick fire, the BackColor assignment threw. New Tick body short-circuits if the timer is no longer in `_activeRejectTimers` (Dispose-sweep already handled it), if `captureMode` flipped off, or if `display.IsDisposed`.
+  - **Overlap guard only covered `lnkUpdate`; `lnkHelp` could still collide at extreme accessibility text-scale.** Added a second guard for `lnkHelp` (cascade-hide rightmost-first). `lnkGitHub` is left as the always-visible anchor at `leftMargin`.
+  - **Probe ID constants duplicated between method-local and Dispose bare literals.** Promoted `PROBE_ID_MAIN = 0x7A1D` and `PROBE_ID_DEAFEN = 0x7A1E` to private class-level const so the unregister-on-dispose defensive path can't drift from the register path.
+
 ## [2.2.3] - 2026-05-18
 
 ### Fixed

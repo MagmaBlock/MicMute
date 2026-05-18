@@ -61,6 +61,15 @@ internal sealed class SettingsDialog : Form
     // sweeps any survivors below.
     private readonly List<System.Windows.Forms.Timer> _activeRejectTimers = new();
 
+    // RegisterHotKey IDs used by the conflict-probe in ValidateHotkeysBeforeApply.
+    // These same IDs are unregistered defensively in Dispose in case the probe
+    // throws between Register and Unregister. Keeping the constants at class
+    // scope ensures both call-sites stay in lock-step — a method-local const
+    // duplicated by bare literals in Dispose drifts the first time someone
+    // bumps one site without touching the other.
+    private const int PROBE_ID_MAIN = 0x7A1D;
+    private const int PROBE_ID_DEAFEN = 0x7A1E;
+
     public SettingsDialog(Config config, Action onApply)
     {
         _config = config;
@@ -370,7 +379,16 @@ internal sealed class SettingsDialog : Form
         // "dark" in MicMute.ini (a user hand-edit, or a future config
         // migration that lowercases) would fall through to System and
         // silently revert the user's theme on next open.
-        int themeIdx = _ddlTheme.FindStringExact(config.ThemeMode);
+        //
+        // Null/empty guard: FindStringExact(null) throws ArgumentNullException
+        // (where IndexOf(null) used to return -1 silently). Config.ThemeMode
+        // is normally populated by Config.Load's safe-defaults, but a corrupt
+        // INI or a partial-write recovery could plausibly leave it null — and
+        // throwing here would crash the dialog ctor for what's a recoverable
+        // config-corruption case.
+        int themeIdx = string.IsNullOrEmpty(config.ThemeMode)
+            ? -1
+            : _ddlTheme.FindStringExact(config.ThemeMode);
         _ddlTheme.SelectedIndex = themeIdx >= 0 ? themeIdx : 0;
         themeWrap.Controls.Add(_ddlTheme);
         themeWrap.Size = new Size(
@@ -513,8 +531,16 @@ internal sealed class SettingsDialog : Form
         // buttons (invisible failure). Hide the rightmost link when it
         // would collide — the user can still reach update check via the
         // tray menu and self-update auto-prompts.
+        // Cascade-hide rightmost-first: lnkUpdate is the longest label, so it
+        // collides first; lnkHelp is checked second to cover the (rare)
+        // extreme-text-scale case where hiding Update alone isn't enough.
+        // lnkGitHub is the anchor at leftMargin and is never hidden — if it
+        // were to collide, the dialog layout itself would be unusable and a
+        // wider-dialog refactor would be the right answer, not a hide.
         if (lnkUpdate.Right > btnOK.Left - UiTokens.BtnGap)
             lnkUpdate.Visible = false;
+        if (lnkHelp.Right > btnOK.Left - UiTokens.BtnGap)
+            lnkHelp.Visible = false;
 
         // Footer clearance — buttons sit at row `y` with BtnHeight=28. The old
         // `y + 38` literal left only 10px of slack below the button which read
@@ -685,8 +711,6 @@ internal sealed class SettingsDialog : Form
         // dialog's HWND would fail with ERROR_HOTKEY_ALREADY_REGISTERED and
         // produce a false "claimed by another app" warning where the "another
         // app" is MicMute itself.
-        const int PROBE_ID_MAIN = 0x7A1D;
-        const int PROBE_ID_DEAFEN = 0x7A1E;
         bool mainUnchanged = _capturedMainHK.Equals(_config.Hotkey, StringComparison.OrdinalIgnoreCase);
         bool deafenUnchanged = _capturedDeafenHK.Equals(_config.DeafenHotkey, StringComparison.OrdinalIgnoreCase);
         if (!mainUnchanged &&
@@ -967,14 +991,28 @@ internal sealed class SettingsDialog : Form
                     _activeRejectTimers.Add(rejectTimer);
                     rejectTimer.Tick += (_, _) =>
                     {
+                        // Three races to defend against:
+                        // (1) Dispose ran between WM_TIMER being posted and us
+                        //     dequeuing it — list no longer contains rejectTimer,
+                        //     and calling Stop on the disposed timer throws
+                        //     ObjectDisposedException into the WinForms thread-
+                        //     exception pump.
+                        // (2) User pressed Escape during the 1800ms window —
+                        //     CancelCapture cleared captureMode and re-painted
+                        //     the field, so restoring FocusYellow here would
+                        //     paint over the cancelled state and strand the
+                        //     row in capture-mode yellow.
+                        // (3) The display TextBox was disposed but the row's
+                        //     closure on captureMode still resolves — the
+                        //     IsDisposed check catches this.
+                        if (!_activeRejectTimers.Remove(rejectTimer))
+                            return; // Dispose-sweep already handled it.
                         rejectTimer.Stop();
-                        _activeRejectTimers.Remove(rejectTimer);
                         rejectTimer.Dispose();
-                        if (!display.IsDisposed)
-                        {
-                            display.Text = prevText;
-                            display.BackColor = UiTokens.FocusYellow;
-                        }
+                        if (display.IsDisposed || !captureMode)
+                            return;
+                        display.Text = prevText;
+                        display.BackColor = UiTokens.FocusYellow;
                     };
                     rejectTimer.Start();
                     return;
@@ -1318,8 +1356,8 @@ internal sealed class SettingsDialog : Form
             // These are no-ops if the IDs aren't registered; calling them is safe.
             if (IsHandleCreated)
             {
-                NativeMethods.UnregisterHotKey(Handle, 0x7A1D);
-                NativeMethods.UnregisterHotKey(Handle, 0x7A1E);
+                NativeMethods.UnregisterHotKey(Handle, PROBE_ID_MAIN);
+                NativeMethods.UnregisterHotKey(Handle, PROBE_ID_DEAFEN);
             }
             _dialogFont?.Dispose();
             foreach (var f in _sectionFonts)
