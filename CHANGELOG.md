@@ -4,6 +4,13 @@
 
 All notable changes to MicMute are documented here.
 
+## [2.2.2] - 2026-05-17
+
+### Fixed
+- **Settings dialog footer clipped on high-DPI displays.** On 125%/150% scaled monitors (reproduced on Suzy laptop) the Save / Apply / Cancel buttons appeared smooshed against the bottom edge of the dialog and the "Cancel" button truncated its trailing "l". Two bugs collided:
+  - The button-width calc subtracted `lnkUpdate.Right` (measured by AutoSize at the *current* monitor DPI) from `rightEdge = 504` (a 96-DPI design-space literal). Mixing coordinate systems made the calc underestimate the available space, and `Math.Max(btnMinWidth, …)` collapsed every action button to its 64px floor — right on the edge of fitting "Cancel" in Segoe UI 9.5pt once the FlatAppearance border inset is subtracted. v2.2.2 drops the shrink-on-overflow math entirely and always uses the full `BtnActionWidth = 80`. The left link group (GitHub / Help / Check for updates) is short enough that the two groups don't collide at any sensible DPI.
+  - `ClientSize.Height = y + 38` left only 10px of clearance below the 28px-tall button row. At fractional DPI ratios the window frame chrome ate a couple of those pixels and the buttons visually touched the bottom edge. v2.2.2 changes the calc to `y + BtnHeight + DialogMargin`, restoring the 16px breathing room used everywhere else in the dialog.
+
 ## [2.2.1] - 2026-05-17
 
 ### Added

@@ -438,14 +438,21 @@ internal sealed class SettingsDialog : Form
 
         // Action buttons (right) — anchored to the right edge via the shared
         // UiFactory so they match Hotkey dialog + any future dialog pixel-perfect.
-        // Widths auto-shrink if the left link-label group runs wide (long locales,
-        // high DPI) so left and right groups never overlap.
-        const int btnMinWidth = 64;
-        const int groupGap = 16;
-        int leftGroupRight = lnkUpdate.Right;
-        int rightGroupAvailable = rightEdge - leftGroupRight - groupGap;
-        int btnWidth = Math.Min(UiTokens.BtnActionWidth,
-            Math.Max(btnMinWidth, (rightGroupAvailable - 2 * UiTokens.BtnGap) / 3));
+        //
+        // Per-Monitor-V2 DPI gotcha: `AutoSize=true` LinkLabels measure their
+        // PreferredWidth at the *current monitor DPI* (font sized in points →
+        // GDI converts to native pixels), while every literal here (`rightEdge`,
+        // `BtnActionWidth`, `BtnGap`) is design-space (96 DPI, per the pin at
+        // the top of this ctor). The previous shrink-on-overflow math
+        // (`rightEdge - lnkUpdate.Right - groupGap / 3`) mixed those two
+        // coordinate systems and collapsed `btnWidth` to its 64px floor on
+        // 125%/150% displays — "Cancel" rendered at the shrunk width was
+        // clipping its trailing "l" against the FlatAppearance border inset.
+        // Fix: always use the full BtnActionWidth. The left-link group is short
+        // enough (GitHub / Help / Check for updates) to never collide at any
+        // sensible DPI, and if a future label runs long it should overflow
+        // its own footprint, not silently truncate the action buttons.
+        int btnWidth = UiTokens.BtnActionWidth;
 
         var btnCancel = UiFactory.MakeButton("Cancel", btnWidth, rightEdge - btnWidth, y);
         btnCancel.Click += (_, _) => Close();
@@ -463,7 +470,13 @@ internal sealed class SettingsDialog : Form
         Controls.Add(btnOK);
         AcceptButton = btnOK;
 
-        ClientSize = new Size(dialogWidth, y + 38);
+        // Footer clearance — buttons sit at row `y` with BtnHeight=28. The old
+        // `y + 38` literal left only 10px of slack below the button which read
+        // as "smooshed against the bottom edge" at Per-Monitor-V2 fractional
+        // DPI ratios where the frame chrome eats a couple of those pixels.
+        // BtnHeight + DialogMargin gives the same 16px breathing room used
+        // everywhere else in the dialog and matches the top padding.
+        ClientSize = new Size(dialogWidth, y + UiTokens.BtnHeight + UiTokens.DialogMargin);
     }
 
     private void ApplySettings()
