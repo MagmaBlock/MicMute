@@ -4,11 +4,24 @@
 
 All notable changes to MicMute are documented here.
 
+## [2.2.3] - 2026-05-18
+
+### Fixed
+- **Settings dialog hardening pass — six small bugs surfaced by the v2.2.2 verifier swarm**, all in `SettingsDialog.cs`. None user-visible on their own; combined they remove a class of silent failure modes around theme persistence, hotkey-ack state, GDI handle leaks under rapid open/close, and one ergonomic edge case for accessibility text-scale users:
+  - **Theme dropdown lookup was case-sensitive.** `Items.IndexOf(config.ThemeMode)` is ordinal-equals; a lowercase `"dark"` in `MicMute.ini` (hand-edit or future config migration) silently fell through to System and reverted the user's theme. Replaced with `_ddlTheme.FindStringExact(...)`, which is case-insensitive.
+  - **Stale `_pendingAckedMainHk = ""` could wipe a valid acked hotkey-conflict.** Scenario: user changes Toggle hotkey, probe succeeds (sets the clear-sentinel `""`), some *other* validation step rejects, user reverts to the prior combo, clicks Apply — the unchanged-hotkey path skipped the probe but the stale `""` sentinel propagated through to `_config.AckedMainHkConflict` and wiped the prior ack. Now reset to `null` at the top of every `ValidateHotkeysBeforeApply` run.
+  - **`rejectTimer` GDI handle leak.** The 1800ms "Bare modifiers need Push-to-Talk mode" tint timer was created inline and disposed only on its own Tick. If the Settings dialog closed during the 1.8s window the native timer handle leaked. Tracked at dialog scope via `_activeRejectTimers` list and swept in `Dispose`.
+  - **GitHub link `Process.Start` threw to the WinForms thread-exception path.** Wrapped in try/catch with `Log.Warn` + a graceful MessageBox so a missing default browser or Group Policy block surfaces as a warning instead of an unhandled-exception dialog.
+  - **Defensive overlap guard for the footer.** Adds a one-line check — if `lnkUpdate.Right > btnOK.Left - BtnGap`, the rightmost link hides itself. Covers the accessibility text-scale override path (independent of display DPI) and any future locale where "Check for updates" measures wider than its design-space footprint. The v2.2.2 fixed-width refactor would otherwise paint labels underneath the buttons (silent failure); old shrink-math clipped buttons (visible failure). Update check is still reachable via the tray menu and the self-update auto-prompt.
+
+### Changed
+- **Internal: replaced 5× duplicate `504` literals and one `488` separator-width literal with their `UiTokens` equivalents (`SettingsSectionRight`, `SectionSeparatorWidth`, `SettingsDialogWidth`).** No user-visible behavior change — eliminates a drift risk where bumping `SettingsDialogWidth` in `UiTokens` would silently leave the section-right anchors and separator line at their old position.
+
 ## [2.2.2] - 2026-05-17
 
 ### Fixed
 - **Settings dialog footer clipped on high-DPI displays.** On 125%/150% scaled monitors (reproduced on Suzy laptop) the Save / Apply / Cancel buttons appeared smooshed against the bottom edge of the dialog and the "Cancel" button truncated its trailing "l". Two bugs collided:
-  - The button-width calc subtracted `lnkUpdate.Right` (measured by AutoSize at the *current* monitor DPI) from `rightEdge = 504` (a 96-DPI design-space literal). Mixing coordinate systems made the calc underestimate the available space, and `Math.Max(btnMinWidth, …)` collapsed every action button to its 64px floor — right on the edge of fitting "Cancel" in Segoe UI 9.5pt once the FlatAppearance border inset is subtracted. v2.2.2 drops the shrink-on-overflow math entirely and always uses the full `BtnActionWidth = 80`. The left link group (GitHub / Help / Check for updates) is short enough that the two groups don't collide at any sensible DPI.
+  - The button-width calc subtracted `lnkUpdate.Right` (measured by AutoSize at the *current* monitor DPI) from `rightEdge` (a derived design-space constant, `dialogWidth - leftMargin = 520 - 16 = 504`). Mixing coordinate systems made the calc underestimate the available space, and `Math.Max(btnMinWidth, …)` collapsed every action button to its 64px floor — right on the edge of fitting "Cancel" in Segoe UI 9.5pt once the FlatAppearance border inset is subtracted. v2.2.2 drops the shrink-on-overflow math entirely and always uses the full `BtnActionWidth = 80`. The left link group (GitHub / Help / Check for updates) is short enough that the two groups don't collide at any sensible DPI.
   - `ClientSize.Height = y + 38` left only 10px of clearance below the 28px-tall button row. At fractional DPI ratios the window frame chrome ate a couple of those pixels and the buttons visually touched the bottom edge. v2.2.2 changes the calc to `y + BtnHeight + DialogMargin`, restoring the 16px breathing room used everywhere else in the dialog.
 
 ## [2.2.1] - 2026-05-17

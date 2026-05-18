@@ -54,6 +54,13 @@ internal sealed class SettingsDialog : Form
     private readonly TextBox _lblIconActive;
     private ToolTip _fileRowTooltip;
 
+    // Tracks in-flight reject-animation timers (the 1800ms tints that fire
+    // when the user tries to capture a bare modifier outside PTT mode).
+    // Without tracking, if the dialog closes during the animation window
+    // the WinForms.Timer's native HWND-bound handle is leaked. Dispose()
+    // sweeps any survivors below.
+    private readonly List<System.Windows.Forms.Timer> _activeRejectTimers = new();
+
     public SettingsDialog(Config config, Action onApply)
     {
         _config = config;
@@ -93,7 +100,7 @@ internal sealed class SettingsDialog : Form
         AddSectionHeader("Hotkeys", leftMargin, ref y);
 
         const int hkSectionLeft = 16;
-        const int hkSectionRight = 504;
+        const int hkSectionRight = UiTokens.SettingsSectionRight;
         const int hkColGap = 12;
         int hkCellW = (hkSectionRight - hkSectionLeft - hkColGap) / 2;
         int hkCol1X = hkSectionLeft;
@@ -141,7 +148,7 @@ internal sealed class SettingsDialog : Form
         // anchored to the section edge like the startup row below). Single
         // baseline shared by all three controls.
         int osdRowY = y;
-        const int osdSectionRight = 504;
+        const int osdSectionRight = UiTokens.SettingsSectionRight;
         const int osdDurWidth = 55;
 
         _chkOsd = new CheckBox
@@ -228,7 +235,7 @@ internal sealed class SettingsDialog : Form
         // single baseline. Checkbox and combo share rowY; the label sits
         // +3px lower so text optically centers against both controls.
         int rowY = y;
-        const int sectionRight = 504;
+        const int sectionRight = UiTokens.SettingsSectionRight;
         const int ddlStartupWidth = 130;
 
         _chkRunAtStartup = new CheckBox
@@ -329,7 +336,7 @@ internal sealed class SettingsDialog : Form
         // OnSettingsApplied detects the is-dark flip and auto-restarts.
         AddSectionHeader("Appearance", leftMargin, ref y);
 
-        const int themeRowSectionRight = 504;
+        const int themeRowSectionRight = UiTokens.SettingsSectionRight;
         const int themeDdlWidth = 130;
         int themeRowY = y;
 
@@ -358,7 +365,12 @@ internal sealed class SettingsDialog : Form
             FlatStyle = FlatStyle.Flat,
         };
         _ddlTheme.Items.AddRange(new object[] { "System", "Dark", "Light" });
-        int themeIdx = _ddlTheme.Items.IndexOf(config.ThemeMode);
+        // FindStringExact does case-INSENSITIVE matching; the legacy
+        // ArrayList.IndexOf path was ordinal-equals, so a lowercase
+        // "dark" in MicMute.ini (a user hand-edit, or a future config
+        // migration that lowercases) would fall through to System and
+        // silently revert the user's theme on next open.
+        int themeIdx = _ddlTheme.FindStringExact(config.ThemeMode);
         _ddlTheme.SelectedIndex = themeIdx >= 0 ? themeIdx : 0;
         themeWrap.Controls.Add(_ddlTheme);
         themeWrap.Size = new Size(
@@ -376,7 +388,7 @@ internal sealed class SettingsDialog : Form
         AddSectionHeader("Custom Files", leftMargin, ref y);
 
         const int sectionInnerLeft = 16;
-        const int sectionInnerRight = 504;
+        const int sectionInnerRight = UiTokens.SettingsSectionRight;
         const int colGap = 12;
         int cellW = (sectionInnerRight - sectionInnerLeft - colGap) / 2;
         int col1X = sectionInnerLeft;
@@ -391,7 +403,7 @@ internal sealed class SettingsDialog : Form
 
         // ── Buttons ──
         y += 12;
-        const int dialogWidth = 520;
+        const int dialogWidth = UiTokens.SettingsDialogWidth;
         int rightEdge = dialogWidth - leftMargin;
 
         // Auxiliary links (left) — subtle, navigation-style. Link / active /
@@ -418,11 +430,30 @@ internal sealed class SettingsDialog : Form
 
         var lnkGitHub = MakeNavLink("GitHub", leftMargin, (_, _) =>
         {
-            using var proc = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            // Process.Start with UseShellExecute=true throws when no default
+            // browser is registered, the URL is blocked by Group Policy, or
+            // (rarely) the ShellExecute handler returns an error HRESULT.
+            // Without the try/catch the lambda escapes to WinForms'
+            // ThreadException pump and surfaces as the standard unhandled-
+            // exception dialog, which looks like a crash to the user. Catch
+            // here and surface a graceful warning instead.
+            try
             {
-                FileName = "https://github.com/itsnateai/MicMute",
-                UseShellExecute = true,
-            });
+                using var proc = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "https://github.com/itsnateai/MicMute",
+                    UseShellExecute = true,
+                });
+            }
+            catch (Exception ex)
+            {
+                Log.Warn("Open GitHub URL failed: " + ex.Message);
+                MessageBox.Show(this,
+                    "Couldn’t open the GitHub page in your browser.\n\n" +
+                    "Details: " + ex.Message,
+                    "MicMute — Open URL",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
         });
         Controls.Add(lnkGitHub);
 
@@ -469,6 +500,21 @@ internal sealed class SettingsDialog : Form
         btnOK.Click += (_, _) => { ApplySettings(); Close(); };
         Controls.Add(btnOK);
         AcceptButton = btnOK;
+
+        // Defensive overlap guard — protects against accessibility text-size
+        // override (Settings → Accessibility → Text size, independent of
+        // display DPI) and any future locale where "Check for updates"
+        // measures wider than its design-space footprint. AutoSize
+        // LinkLabels measure at the live monitor DPI / font-scale, not the
+        // 96-DPI design pin, so a >175% text scale or a long-form locale
+        // string can push lnkUpdate.Right past btnOK.Left. The pre-v2.2.2
+        // shrink-math caught this by clipping the buttons (visible failure);
+        // the fixed-width refactor would otherwise paint labels UNDER the
+        // buttons (invisible failure). Hide the rightmost link when it
+        // would collide — the user can still reach update check via the
+        // tray menu and self-update auto-prompts.
+        if (lnkUpdate.Right > btnOK.Left - UiTokens.BtnGap)
+            lnkUpdate.Visible = false;
 
         // Footer clearance — buttons sit at row `y` with BtnHeight=28. The old
         // `y + 38` literal left only 10px of slack below the button which read
@@ -562,6 +608,28 @@ internal sealed class SettingsDialog : Form
     private bool ValidateHotkeysBeforeApply()
     {
         bool pttMode = _config.Mode == "push-to-talk";
+
+        // Reset the pending-ack sentinels at the top of every Validate run.
+        // Without this, a stale value can survive across Apply attempts when
+        // the user reverts a captured combo back to its prior _config value.
+        // Reproducer that motivated this fix:
+        //   1. Config has Hotkey=X, AckedMainHkConflict=X (user acked X long ago)
+        //   2. User opens Settings, changes Toggle to Y → probe Y succeeds →
+        //      _pendingAckedMainHk = "" (clear-on-Apply sentinel)
+        //   3. Some other validation later in the chain rejects (deafen warn,
+        //      icon hard-fail, etc.) → ValidateHotkeysBeforeApply returns false
+        //      WITHOUT clearing the pending sentinels (instance state survives).
+        //   4. User reverts Y back to X, clicks Apply.
+        //   5. mainUnchanged is now true → probe block skipped → _pending stays "".
+        //   6. ApplySettings's `if (_pendingAckedMainHk != null) _config.Acked... = ""`
+        //      wipes the X ack out of config. Next launch, X is no longer acked
+        //      and the user gets a "claimed by another app" warning they
+        //      already dismissed.
+        // The fix is one reset per Validate entry — the rest of the deferred-
+        // commit pattern (null = leave alone, "" = clear on Apply, value = set
+        // on Apply) stays intact.
+        _pendingAckedMainHk = null;
+        _pendingAckedDeafenHk = null;
 
         // Parse check — reject invalid combos up front rather than letting
         // RegisterMainHotkey/RegisterDeafenHotkey silently fail later.
@@ -719,7 +787,7 @@ internal sealed class SettingsDialog : Form
             BackColor = Theme.DividerColor,
             BorderStyle = BorderStyle.None,
             Height = 1,
-            Width = 488,
+            Width = UiTokens.SectionSeparatorWidth,
             Location = new Point(x, y),
         };
         Controls.Add(sep);
@@ -896,9 +964,11 @@ internal sealed class SettingsDialog : Form
                     string prevText = display.Text;
                     display.Text = "Bare modifiers need Push-to-Talk mode";
                     var rejectTimer = new System.Windows.Forms.Timer { Interval = 1800 };
+                    _activeRejectTimers.Add(rejectTimer);
                     rejectTimer.Tick += (_, _) =>
                     {
                         rejectTimer.Stop();
+                        _activeRejectTimers.Remove(rejectTimer);
                         rejectTimer.Dispose();
                         if (!display.IsDisposed)
                         {
@@ -1256,6 +1326,16 @@ internal sealed class SettingsDialog : Form
                 f.Dispose();
             _sectionFonts.Clear();
             _fileRowTooltip?.Dispose();
+            // Sweep any in-flight reject-animation timers — covers the
+            // narrow race where the user dismisses Settings during the
+            // 1800ms tint window. Iterate a copy because Stop()→Tick
+            // could mutate the list during the sweep.
+            foreach (var t in _activeRejectTimers.ToArray())
+            {
+                t.Stop();
+                t.Dispose();
+            }
+            _activeRejectTimers.Clear();
         }
         base.Dispose(disposing);
     }
