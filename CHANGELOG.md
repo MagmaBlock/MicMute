@@ -4,6 +4,11 @@
 
 All notable changes to MicMute are documented here.
 
+## [2.2.1] - 2026-05-17
+
+### Added
+- **Brand-blue title row in the tray right-click menu.** The "MicMute v…" header now paints with the same `Theme.TitlebarBg` brand blue + white text as the dialog titlebars (`#2255AA` light / `#3B5BA8` dark) so the tray menu chrome reads as the same surface family as Settings / Help / Update. Tag-based dispatch in `MenuRenderer` — `TrayApp.BuildTrayMenu` sets `titleItem.Tag = MenuRenderer.TitleItemTag` and the renderer's `OnRenderMenuItemBackground` + `OnRenderItemText` short-circuit to the brand-blue treatment when that tag is present. No structural changes to the menu — only the topmost header row is themed; everything else (mode submenu, device list, separators, settings, exit) keeps its existing colours.
+
 ## [2.2.0] - 2026-05-17
 
 ### Added

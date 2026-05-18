@@ -1218,13 +1218,17 @@ internal sealed class TrayApp : Form
         _menuTitleFont?.Dispose();
         _menuTitleFont = new Font(_trayMenu.Font, FontStyle.Bold);
 
-        // Title — program name + version. Non-interactive header, greyed via
-        // Enabled=false so it reads as a label (like CapsLock's tray header).
+        // Title — program name + version. Non-interactive header. Tag tells
+        // MenuRenderer to paint this row with TitlebarBg (brand blue + white
+        // text), matching the dialog titlebar treatment so the tray menu
+        // chrome reads as the same surface family as Settings/Help/Update.
+        // Enabled stays true so the white text isn't disabled-greyed — the
+        // header has no Click handler, so leaving it Enabled is harmless.
         var titleItem = new ToolStripMenuItem("MicMute v" + Config.Version)
         {
             Font = _menuTitleFont,
             TextAlign = ContentAlignment.MiddleCenter,
-            Enabled = false,
+            Tag = MenuRenderer.TitleItemTag,
         };
         _trayMenu.Items.Add(titleItem);
         _trayMenu.Items.Add(new ToolStripSeparator());
