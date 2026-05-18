@@ -137,15 +137,26 @@ internal sealed class SettingsDialog : Form
         // Per-cell hints stacked vertically beneath the two-column row.
         // Both span the full section width — cell-width clipping would
         // have forced too-terse phrasing.
+        // MaximumSize forces wrap when DPI font-scaling pushes the rendered
+        // text width past the section's design-space footprint. AutoSize
+        // LinkLabels and Labels both measure their PreferredWidth at the
+        // live monitor DPI, so a 125%/150% display can render a string ~30%
+        // wider than the 96-DPI design pin. Without MaximumSize the label
+        // grows rightward past the dialog edge and the trailing words clip.
+        // The .Height + 2 advance below uses the post-wrap Height so the
+        // next row gets the right vertical baseline whether the label fits
+        // on one line or wraps to two.
         var toggleHint = UiFactory.MakeHintLabel(
             "Toggle Mute: mutes / unmutes your mic. In Push-to-Talk mode, hold to talk.",
             indent, y);
+        toggleHint.MaximumSize = new Size(UiTokens.SettingsSectionRight - indent, 0);
         Controls.Add(toggleHint);
         y += toggleHint.Height + 2;
 
         var deafenHint = UiFactory.MakeHintLabel(
             "Deafen: mutes your mic AND your speakers at the same time.",
             indent, y);
+        deafenHint.MaximumSize = new Size(UiTokens.SettingsSectionRight - indent, 0);
         Controls.Add(deafenHint);
         y += deafenHint.Height + 10;
 
@@ -158,7 +169,7 @@ internal sealed class SettingsDialog : Form
         // baseline shared by all three controls.
         int osdRowY = y;
         const int osdSectionRight = UiTokens.SettingsSectionRight;
-        const int osdDurWidth = 55;
+        const int osdDurWidth = UiTokens.OsdDurationWidth;
 
         _chkOsd = new CheckBox
         {
@@ -230,11 +241,22 @@ internal sealed class SettingsDialog : Form
         _chkMuteLock.FlatAppearance.CheckedBackColor = Theme.HighlightBg;
         _chkMuteLock.FlatAppearance.MouseOverBackColor = Theme.HighlightBg;
         Controls.Add(_chkMuteLock);
+        // MuteLock hint: moved from inline (right-of-checkbox) to its own
+        // line below. At higher DPI the checkbox's AutoSize-measured Right
+        // edge was in live-monitor pixels while UiTokens.SettingsSectionRight
+        // is design-space (96 DPI), so calculating the inline hint's
+        // available width via `SettingsSectionRight - _chkMuteLock.Right`
+        // mixed coordinate systems and produced an undersized clip box \u2014
+        // text overflowed past the right edge of the dialog on 125%/150%
+        // displays. Moving the hint to its own line lets it occupy the
+        // full section width and wrap cleanly via MaximumSize.
+        y += _chkMuteLock.Height + 2;
         var muteLockHint = UiFactory.MakeHintLabel(
-            "\u2014  reverts external mute changes every 15 seconds (not instant).",
-            _chkMuteLock.Right + 4, y + 1);
+            "Reverts external mute changes every 15 seconds (not instant).",
+            indent + 14, y);
+        muteLockHint.MaximumSize = new Size(UiTokens.SettingsSectionRight - (indent + 14), 0);
         Controls.Add(muteLockHint);
-        y += _chkMuteLock.Height + 4;
+        y += muteLockHint.Height + 6;
         _chkMiddleClick = AddCheckBox("Middle-click tray icon to toggle Toggle/PTT mode", indent, ref y, config.MiddleClickToggle);
         string startupPath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.Startup), "MicMute.lnk");
@@ -245,7 +267,7 @@ internal sealed class SettingsDialog : Form
         // +3px lower so text optically centers against both controls.
         int rowY = y;
         const int sectionRight = UiTokens.SettingsSectionRight;
-        const int ddlStartupWidth = 130;
+        const int ddlStartupWidth = UiTokens.DropdownWidth;
 
         _chkRunAtStartup = new CheckBox
         {
@@ -346,7 +368,7 @@ internal sealed class SettingsDialog : Form
         AddSectionHeader("Appearance", leftMargin, ref y);
 
         const int themeRowSectionRight = UiTokens.SettingsSectionRight;
-        const int themeDdlWidth = 130;
+        const int themeDdlWidth = UiTokens.DropdownWidth;
         int themeRowY = y;
 
         var themeLabel = new Label
@@ -463,10 +485,19 @@ internal sealed class SettingsDialog : Form
                     UseShellExecute = true,
                 });
             }
-            catch (Exception ex)
+            catch (Exception ex) when (
+                ex is System.ComponentModel.Win32Exception
+                   or InvalidOperationException
+                   or System.IO.FileNotFoundException
+                   or UnauthorizedAccessException)
             {
                 Log.Warn("Open GitHub URL failed: " + ex.Message);
-                MessageBox.Show(this,
+                // Owner-window safety: passing `this` as the MessageBox owner
+                // while the form is mid-dispose produces a broken/invisible
+                // modal. The link CAN be clicked during close (Enter on Save
+                // while focus is on the link), so guard defensively.
+                IWin32Window owner = (IsHandleCreated && !IsDisposed) ? (IWin32Window)this : null;
+                MessageBox.Show(owner,
                     "Couldn’t open the GitHub page in your browser.\n\n" +
                     "Details: " + ex.Message,
                     "MicMute — Open URL",
@@ -542,17 +573,30 @@ internal sealed class SettingsDialog : Form
         if (lnkHelp.Right > btnOK.Left - UiTokens.BtnGap)
             lnkHelp.Visible = false;
 
-        // Footer clearance — buttons sit at row `y` with BtnHeight=28. The old
-        // `y + 38` literal left only 10px of slack below the button which read
-        // as "smooshed against the bottom edge" at Per-Monitor-V2 fractional
-        // DPI ratios where the frame chrome eats a couple of those pixels.
-        // BtnHeight + DialogMargin gives the same 16px breathing room used
-        // everywhere else in the dialog and matches the top padding.
-        ClientSize = new Size(dialogWidth, y + UiTokens.BtnHeight + UiTokens.DialogMargin);
+        // Footer clearance — empirically tuned to comfortable spacing at
+        // 100% (Nate's Asus) AND 125%/150% (Suzy's laptop). v2.2.4 used
+        // `y + BtnHeight + DialogMargin` (= y + 44 design = ~20px native gap
+        // at 125% DPI); Suzy reported the Apply/Cancel row still felt
+        // smooshed at her scale. v2.2.6 adds an extra ColumnGap (12 design)
+        // for ~30 native px at 125% / ~36 at 150%, which reads comfortable
+        // without making the dialog look top-heavy at 100%.
+        ClientSize = new Size(dialogWidth,
+            y + UiTokens.BtnHeight + UiTokens.DialogMargin + UiTokens.ColumnGap);
     }
 
     private void ApplySettings()
     {
+        // Validate FIRST — atomic commit semantics.
+        // Pre-v2.2.5, ApplySettings mutated 7 `_config` fields and could
+        // create/delete the startup `.lnk` BEFORE `ValidateHotkeysBeforeApply`
+        // ran. If validation rejected (invalid hotkey, dup, user clicked No
+        // on "use it anyway"), the hotkey didn't save — but every other
+        // field was already on `_config` and the filesystem side-effect
+        // already landed. The user got a silent partial commit. v2.2.5
+        // reorders so either everything saves or nothing does.
+        if (!ValidateHotkeysBeforeApply())
+            return;
+
         _config.SoundFeedback = _chkSoundFeedback.Checked;
         _config.OsdEnabled = _chkOsd.Checked;
 
@@ -573,8 +617,26 @@ internal sealed class SettingsDialog : Form
         // Startup shortcut
         string startupPath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.Startup), "MicMute.lnk");
+        // Startup shortcut — wrapped symmetrically. Pre-v2.2.5 the
+        // CreateShortcut call had no try/catch (the delete path did), so a
+        // locked Startup folder / GPO restriction / AV interference would
+        // surface as an unhandled exception to the WinForms ThreadException
+        // pump instead of a recoverable user warning.
         if (_chkRunAtStartup.Checked && !File.Exists(startupPath))
-            ShortcutHelper.CreateShortcut(startupPath, Environment.ProcessPath ?? "");
+        {
+            try { ShortcutHelper.CreateShortcut(startupPath, Environment.ProcessPath ?? ""); }
+            catch (Exception ex)
+            {
+                Log.Warn("Create startup shortcut failed: " + ex.Message);
+                MessageBox.Show(this,
+                    "Couldn’t create the startup shortcut in your Startup folder.\n\n" +
+                    "“Run at startup” is enabled in Settings but the .lnk couldn’t " +
+                    "be written. MicMute won’t auto-start until this is resolved.\n\n" +
+                    "Details: " + ex.Message,
+                    "MicMute — Startup shortcut",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
         else if (!_chkRunAtStartup.Checked && File.Exists(startupPath))
             try { File.Delete(startupPath); }
             catch (Exception ex)
@@ -588,10 +650,9 @@ internal sealed class SettingsDialog : Form
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
 
-        // Hotkeys — captured inline in the Hotkeys section. Validate here
-        // before committing so the user sees feedback before Apply closes.
-        if (!ValidateHotkeysBeforeApply())
-            return;
+        // Hotkeys — committed post-validation. ValidateHotkeysBeforeApply
+        // ran at the very top of ApplySettings (atomic-commit guarantee);
+        // pending sentinels carry the ack state it set up.
         _config.Hotkey = _capturedMainHK;
         _config.DeafenHotkey = _capturedDeafenHK;
         if (_pendingAckedMainHk != null) _config.AckedMainHkConflict = _pendingAckedMainHk;
@@ -862,7 +923,7 @@ internal sealed class SettingsDialog : Form
     {
         // Layout: [label 76][gap4][display flex][gap4][× 22] — identical to
         // Custom Files for visual consistency across sections.
-        const int labelWidth = 76;
+        const int labelWidth = UiTokens.CellLabelWidth;
         const int btnWidth = UiTokens.BtnIconWidth;
         const int gap = UiTokens.RowGap;
 
@@ -895,6 +956,13 @@ internal sealed class SettingsDialog : Form
 
         bool captureMode = false;
         string preCaptureValue = null;
+        // Per-row in-flight rejection animation timer. If the user mashes
+        // bare-modifier keys rapidly during capture (e.g. Ctrl-Ctrl-Ctrl in
+        // Toggle mode), each press would otherwise spawn its own 1800ms
+        // timer; all of them tick over each other and the row visually
+        // flickers / ends in the wrong color. Track one per row so a new
+        // press cancels the previous animation cleanly.
+        System.Windows.Forms.Timer rowRejectTimer = null;
 
         void Refresh()
         {
@@ -987,7 +1055,22 @@ internal sealed class SettingsDialog : Form
                     display.BackColor = UiTokens.ErrorTint;
                     string prevText = display.Text;
                     display.Text = "Bare modifiers need Push-to-Talk mode";
-                    var rejectTimer = new System.Windows.Forms.Timer { Interval = 1800 };
+                    // Multiple-active guard: cancel any in-flight rejection
+                    // animation on THIS row before starting a new one. Without
+                    // this, rapid key-mashing stacks timers that all tick over
+                    // each other.
+                    if (rowRejectTimer != null)
+                    {
+                        rowRejectTimer.Stop();
+                        _activeRejectTimers.Remove(rowRejectTimer);
+                        rowRejectTimer.Dispose();
+                        rowRejectTimer = null;
+                    }
+                    var rejectTimer = new System.Windows.Forms.Timer
+                    {
+                        Interval = UiTokens.RejectAnimDurationMs,
+                    };
+                    rowRejectTimer = rejectTimer;
                     _activeRejectTimers.Add(rejectTimer);
                     rejectTimer.Tick += (_, _) =>
                     {
@@ -1006,9 +1089,11 @@ internal sealed class SettingsDialog : Form
                         //     closure on captureMode still resolves — the
                         //     IsDisposed check catches this.
                         if (!_activeRejectTimers.Remove(rejectTimer))
-                            return; // Dispose-sweep already handled it.
+                            return; // Dispose-sweep or multiple-active-guard already handled it.
                         rejectTimer.Stop();
                         rejectTimer.Dispose();
+                        if (rowRejectTimer == rejectTimer)
+                            rowRejectTimer = null;
                         if (display.IsDisposed || !captureMode)
                             return;
                         display.Text = prevText;

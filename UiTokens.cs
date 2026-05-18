@@ -35,6 +35,22 @@ internal static class UiTokens
     public const int CellLabelWidth         = 76;
     public const int CellFileLabelWidth     = 88;    // "Unmute sound" needs a touch more
 
+    // ── Dropdowns / numeric inputs ──────────────────────────────────────
+    // Default ComboBox width for the right-anchored dropdowns on settings rows
+    // (Mic-mode-on-startup, Theme). Both want the same width so the right edge
+    // of the wrapping border panel lines up with the section-right anchor.
+    public const int DropdownWidth          = 130;
+    // OSD-duration NumericUpDown width — wide enough for a 5-digit value
+    // (10000 ms cap) plus the spinner band.
+    public const int OsdDurationWidth       = 55;
+
+    // ── Animation timings ───────────────────────────────────────────────
+    // Reject-animation tint duration: how long the hotkey-row display stays
+    // red ("Bare modifiers need Push-to-Talk mode") before reverting to the
+    // capture-mode yellow. Long enough to read, short enough not to feel like
+    // a freeze.
+    public const int RejectAnimDurationMs   = 1800;
+
     // ── Colors ──────────────────────────────────────────────────────────
     // Route through Theme so every dialog auto-themes with the user's
     // ThemeMode pin. Properties (not fields) so a read returns the active

@@ -4,6 +4,29 @@
 
 All notable changes to MicMute are documented here.
 
+## [2.2.6] - 2026-05-18
+
+### Fixed
+- **Three high-DPI clipping issues reported from Suzy's laptop (125% display scale).** v2.2.5 fixed the v2.2.4 verifier round; Suzy's real-world test surfaced three more layout breakages, all rooted in the same coordinate-system mismatch (AutoSize labels measure in live-monitor pixels; section constants are 96-DPI design pixels):
+  - **Hotkeys-section hint labels clipping mid-word.** "Toggle Mute: mutes / unmutes your mic. In Push-to-Talk mode, hold to talk." truncated at "hold to" on Suzy's screen and the rest disappeared off the right edge of the dialog. Same shape for the Deafen hint. Both labels now set `MaximumSize = new Size(SettingsSectionRight - indent, 0)` so AutoSize wraps to a second line instead of overflowing the section's right edge. The `y +=` advance uses the post-wrap `Height` so the next row gets the right baseline.
+  - **MuteLock hint clipping at "no".** The hint was rendered inline to the right of the checkbox (`Location = _chkMuteLock.Right + 4`), which meant the inline space depended on the checkbox's live-DPI-measured width — the same mixed-coordinate-system trap. Moved the hint to its own line below the checkbox, indented to align with the checkbox label, with the same `MaximumSize` wrap protection. Shortened the leading em-dash since the inline anchor is gone.
+  - **Footer clearance still too tight at 125% DPI.** v2.2.4's `y + BtnHeight + DialogMargin` (= y + 44 design = ~20 native px below the buttons at 125%) read as smooshed on Suzy's screen. Bumped to `y + BtnHeight + DialogMargin + ColumnGap` (= y + 56 design = ~30 native px at 125%, ~36 at 150%), which feels comfortable across the DPI range Nate's machines actually run at.
+
+## [2.2.5] - 2026-05-18
+
+### Fixed
+- **Settings dialog audit closure — Round 3.** Six items the v2.2.4 verifier swarm surfaced were initially deferred to a follow-up handoff; the LTR closure policy is "zero deferred", so they ship here:
+  - **`ApplySettings` partial-commit on validation abort.** The pre-v2.2.5 order mutated seven `_config` fields and could create/delete the startup `.lnk` BEFORE `ValidateHotkeysBeforeApply` ran. If validation rejected, the hotkey didn't save but every other field already had — silent partial commit, no user feedback. v2.2.5 moves the validation call to the very top of `ApplySettings` so the dialog is atomic: either everything saves or nothing does.
+  - **`ShortcutHelper.CreateShortcut` had no try/catch.** The delete path was guarded with `Log.Warn` + a recoverable MessageBox; the create path was not, so a locked Startup folder / GPO restriction / AV interference would propagate as an unhandled exception to the WinForms thread-exception pump. Wrapped symmetrically.
+  - **GitHub link `Process.Start` catch was too broad + MessageBox owner unsafe during close.** Narrowed `catch (Exception)` to `catch when (Win32Exception or InvalidOperationException or FileNotFoundException or UnauthorizedAccessException)` — system-fatal exceptions now propagate as intended. MessageBox owner-window now checks `IsHandleCreated && !IsDisposed` and falls back to a null owner if the form is mid-dispose.
+  - **`rejectTimer` multiple-active race.** Rapid key-mashing during hotkey capture would stack 1800ms reject-animation timers; they'd all tick over each other and the row visually flickered. Added per-row `rowRejectTimer` tracking via closure variable; any in-flight animation is cancelled before a new one starts.
+  - **Magic numbers routed through `UiTokens`.** Added `DropdownWidth = 130` (the right-anchored dropdowns on Mic-mode-on-startup + Theme rows), `OsdDurationWidth = 55` (the NumericUpDown beside "Duration (ms):"), and `RejectAnimDurationMs = 1800` (the reject-tint duration). Also routed the existing `CellLabelWidth = 76` token through the hotkey row layout (was duplicated as a local literal).
+  - **`_lockDebounce` doc/code drift in `CLAUDE.md`** (carried from the 2026-04-16 audit's P3-02). The doc claimed the flag is set from mute paths before `SetMuteState`; the code only toggles it inside `OnSyncTick` (self-healing across two 15s ticks). Doc rewritten to match the actual sync-timer-only design.
+
+### Changed
+- **`AUDIT_TASKS.md` reset to clean state.** The 2026-04-16 audit's nine items are all resolved — five between v2.1.5 and v2.2.4, two in this release, two closed-by-decision (OSD multi-monitor positioning + large-function refactoring; both with documented reasoning). Per the LTR closure policy, resolved items are deleted from the tracking file rather than archived, so future audit passes don't re-raise them.
+- **`MASTER_BUGLIST.md` marked as historical artifact.** That file was the Phase-1 synthesis of an audit-swarm dispatch that was superseded by ongoing fix-on-touch patches. Added a status banner so a future agent doesn't mistake it for an active task list. The P0/P1 ship blockers it identified are all resolved against the current codebase.
+
 ## [2.2.4] - 2026-05-18
 
 ### Fixed
