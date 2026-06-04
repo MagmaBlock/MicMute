@@ -4,6 +4,16 @@
 
 All notable changes to MicMute are documented here.
 
+## [2.3.0] - 2026-06-04
+
+### Fixed
+- **High-DPI rendering, fixed structurally.** Every dialog (Settings, Update, Help) and the OSD bubble + tray menu now render proportionally identical at 100% and 150% display scale — the same layout, just scaled, the way every native app behaves. Versions 2.2.3–2.2.7 chased this with absolute-pixel band-aids (MaximumSize wrap, literal `\n` hard-breaks, cascade-hide guards, hand-tuned per-DPI offsets); each fixed one clip and exposed another, because the dialogs were authored in 96-DPI absolute pixels and only the *fonts* grew at higher scale. This release removes the pixel literals instead of patching them, so there is nothing left to mis-scale.
+
+### Changed
+- **Settings + Update dialogs rebuilt on relational layout containers.** Absolute `new Point(x, y)` / running-`int y` positioning was replaced with a small layout kit (`UI/Layout.cs` — a flat-section Stack/Section, themed height-free field factories, a footer split-bar) so position and size are relational; there are no pixel coordinates to get wrong. All behavior is unchanged (inline hotkey capture, validation, atomic apply, theme restart, disposal) — confirmed by the existing 51-test suite and adversarial code review.
+- **Deterministic DPI scaling.** Real-150% testing (on a dedicated high-DPI VM) showed WinForms `AutoScaleMode.Dpi` scales point-fonts but **not** the pixel margins, fixed control widths, or window size inside layout containers under Per-Monitor-V2 — leaving 150% proportionally tighter than 100% (numeric/combo text clipped, spacing compressed). The dialogs now use `AutoScaleMode.None` plus a single explicit pass (`UiLayout.ApplyDpi`) that scales every pixel literal — margins, paddings, numeric/combo/button sizes, section dividers — by the device factor on load. 100% renders are byte-identical to v2.2.7; 150% is exactly 100% × 1.5, verified at real 144 DPI.
+- **OSD bubble + tray-menu owner-draw geometry** (the mute/active dot, text inset, paddings, separator inset) now scale with DPI via `LogicalToDeviceUnits`, so they stay proportional at every scale instead of rendering at a fixed 96-DPI size.
+
 ## [2.2.7] - 2026-05-18
 
 ### Fixed
