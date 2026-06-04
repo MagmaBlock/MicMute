@@ -167,7 +167,13 @@ internal static class DiagRender
             form.Location = new Point(screen.WorkingArea.X + 20, screen.WorkingArea.Y + 20);
             form.Show();
             Pump();
+            // A form may resize itself to fit content in OnShown (SettingsDialog does);
+            // force the layout to settle before capturing so the bitmap matches the final
+            // arrangement, not a transient mid-resize one.
+            form.PerformLayout();
+            Pump();
             var result = Capture(form, Path.Combine(outDir, $"{name}.png"));
+            DumpTree(name, form, 0);
             form.Hide();
             return result;
         }
@@ -213,11 +219,15 @@ internal static class DiagRender
 
     private static (int, Size, Size) Capture(Control c, string pngPath)
     {
-        var client = c.ClientSize;
-        using var bmp = new Bitmap(Math.Max(1, client.Width), Math.Max(1, client.Height));
+        // Size the bitmap to the FULL window, not ClientSize — Control.DrawToBitmap renders
+        // a Form with PRF_NONCLIENT (titlebar + border), so a ClientSize-only bitmap offsets
+        // the content down by the caption height and clips the bottom row. (Borderless OSD /
+        // ToolStripDropDown have Size == client, so this is correct for them too.)
+        var win = c.Size;
+        using var bmp = new Bitmap(Math.Max(1, win.Width), Math.Max(1, win.Height));
         c.DrawToBitmap(bmp, new Rectangle(0, 0, bmp.Width, bmp.Height));
         bmp.Save(pngPath, ImageFormat.Png);
-        return (c.DeviceDpi, client, c.Size);
+        return (c.DeviceDpi, c.ClientSize, win);
     }
 
     private static void Pump()
@@ -225,6 +235,19 @@ internal static class DiagRender
         // Let handle creation, PerformAutoScale, layout, and the first paint settle.
         for (int i = 0; i < 8; i++) Application.DoEvents();
     }
+
+    // Debug: dump the control tree with bounds so layout collapses (0-height rows) are
+    // visible in the log. Capped depth/breadth to keep the log readable.
+    private static void DumpTree(string tag, Control c, int depth)
+    {
+        if (depth > 6) return;
+        string kind = c.GetType().Name;
+        string text = c is Label or Button or LinkLabel or CheckBox ? $" \"{Trunc(c.Text)}\"" : "";
+        s_log.AppendLine($"[tree:{tag}] {new string(' ', depth * 2)}{kind}{text} @{c.Left},{c.Top} {c.Width}x{c.Height}");
+        foreach (Control child in c.Controls) DumpTree(tag, child, depth + 1);
+    }
+
+    private static string Trunc(string s) => string.IsNullOrEmpty(s) ? "" : (s.Length > 22 ? s.Substring(0, 22) : s).Replace("\n", "\\n");
 
     private static string ArgVal(string[] args, string key)
     {
