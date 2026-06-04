@@ -4,139 +4,21 @@ using System.Drawing;
 using System.Windows.Forms;
 
 /// <summary>
-/// Shared factory for MicMute UI controls. All dialogs MUST use these
-/// builders — no bare `new Button { ... }` scattered across dialog code.
-/// Sizes, colors, and paddings come from <see cref="UiTokens"/>.
-///
-/// The factory guarantees that every button has the same Height,
-/// AutoSize=false, and UseVisualStyleBackColor=true. That's the defense
-/// against the "different button sizes on different tabs" drift pattern.
+/// Shared, non-positional UI helper. The button/label/field factories that used to live
+/// here were retired when the dialogs moved to the relational <see cref="UiLayout"/> /
+/// <see cref="Fields"/> container kit (no more <c>x, y</c> arguments); only the owner-draw
+/// themed ToolTip — which has no layout position — remains.
 /// </summary>
 internal static class UiFactory
 {
-    // ── Buttons ─────────────────────────────────────────────────────────
-
-    public static Button MakeButton(string text, int width, int x, int y)
-    {
-        var btn = new Button
-        {
-            Text = text,
-            Width = width,
-            Height = UiTokens.BtnHeight,
-            AutoSize = false,
-            // FlatStyle.Flat + explicit Theme.* colors instead of
-            // UseVisualStyleBackColor — the visual-styles path renders the
-            // OS-themed (light) button chrome regardless of our BackColor,
-            // which clashes with dark dialogs. Flat respects every color
-            // assignment and lets HighlightBg / EditBg drive hover/press.
-            FlatStyle = FlatStyle.Flat,
-            ForeColor = Theme.FgColor,
-            BackColor = Theme.BgColor,
-            Location = new Point(x, y),
-        };
-        btn.FlatAppearance.BorderColor = Theme.DividerColor;
-        btn.FlatAppearance.MouseOverBackColor = Theme.HighlightBg;
-        btn.FlatAppearance.MouseDownBackColor = Theme.EditBgColor;
-        return btn;
-    }
-
-    public static Button MakeActionButton(string text, int x, int y)
-        => MakeButton(text, UiTokens.BtnActionWidth, x, y);
-
-    public static Button MakeWideButton(string text, int x, int y)
-        => MakeButton(text, UiTokens.BtnWideWidth, x, y);
-
     /// <summary>
-    /// Single-glyph flat button used inline with TextBox fields (× clear).
-    /// Height matches TextBox row height — NOT action-button height — so it
-    /// doesn't stick out below the field. FlatStyle=Flat + TabStop=false
-    /// since these are accessory buttons; primary keyboard path is
-    /// Enter/Space on the adjacent display field.
+    /// Themed ToolTip. Win32 ToolTip ignores BackColor/ForeColor on the modern themed
+    /// (visual-styles) paint path, so we go OwnerDraw and paint Bg/Fg/border ourselves.
+    /// Without this the tip would always render with the OS-default light yellow chrome.
     ///
-    /// Dark-mode contrast (user report 2026-05-18):
-    /// - BackColor matches the adjacent TextBox (EditBg) so the button reads
-    ///   as part of the same input strip instead of floating in the form Bg
-    ///   with a near-invisible border.
-    /// - Border uses <see cref="Theme.IconButtonBorder"/> (brighter than
-    ///   Divider) so the small 22×23 outline registers against the form Bg.
-    /// - Disabled-state glyph is repainted via the Paint event using
-    ///   <see cref="Theme.FgDisabledColor"/>. FlatStyle.Flat's built-in
-    ///   disabled renderer falls back to a system grey that's near-invisible
-    ///   on the dark Mocha Bg — the explicit override keeps the × readable
-    ///   in both palettes whether the button is enabled (active hotkey /
-    ///   custom file set) or disabled (default state, nothing to clear).
-    /// </summary>
-    public static Button MakeIconButton(string glyph, int x, int y)
-    {
-        var btn = new Button
-        {
-            Text = glyph,
-            Width = UiTokens.BtnIconWidth,
-            Height = UiTokens.BtnIconHeight,
-            AutoSize = false,
-            FlatStyle = FlatStyle.Flat,
-            ForeColor = Theme.FgColor,
-            BackColor = Theme.EditBgColor,
-            TabStop = false,
-            Location = new Point(x, y),
-        };
-        btn.FlatAppearance.BorderColor = Theme.IconButtonBorder;
-        btn.FlatAppearance.MouseOverBackColor = Theme.HighlightBg;
-        btn.FlatAppearance.MouseDownBackColor = Theme.BgColor;
-
-        // Disabled-state override. FlatStyle.Flat's OnPaint already drew the
-        // background + border + grey glyph; we just overpaint the glyph in
-        // our explicit FgDisabled token. Inset by 1px so the FlatAppearance
-        // border stays intact.
-        btn.Paint += (s, e) =>
-        {
-            if (btn.Enabled) return;
-            var inner = new Rectangle(1, 1, btn.Width - 2, btn.Height - 2);
-            using var bgBrush = new SolidBrush(btn.BackColor);
-            e.Graphics.FillRectangle(bgBrush, inner);
-            TextRenderer.DrawText(
-                e.Graphics, btn.Text, btn.Font, btn.ClientRectangle,
-                Theme.FgDisabledColor,
-                TextFormatFlags.HorizontalCenter
-                | TextFormatFlags.VerticalCenter
-                | TextFormatFlags.NoPrefix);
-        };
-        return btn;
-    }
-
-    // ── Labels ──────────────────────────────────────────────────────────
-
-    public static Label MakeHintLabel(string text, int x, int y) => new()
-    {
-        Text = text,
-        AutoSize = true,
-        ForeColor = UiTokens.HintColor,
-        Location = new Point(x, y),
-    };
-
-    public static Label MakeFieldLabel(string text, int x, int y, int width) => new()
-    {
-        Text = text,
-        Width = width,
-        AutoSize = false,
-        ForeColor = UiTokens.LabelColor,
-        Location = new Point(x, y),
-    };
-
-    // ── Primary factory helpers for read-only "clickable" textboxes used
-    //    in compact hotkey and file-picker rows. ReadOnly + cursor=Hand so
-    //    the user knows it's interactive; click/Enter/Space trigger the
-    //    caller-provided action.
-
-    /// <summary>
-    /// Themed ToolTip. Win32 ToolTip ignores BackColor/ForeColor on the
-    /// modern themed (visual-styles) paint path, so we go OwnerDraw and
-    /// paint Bg/Fg/border ourselves. Without this the tip would always
-    /// render with the OS-default light yellow chrome regardless of pin.
-    ///
-    /// Pre-allocates a Segoe UI 9pt font on the ToolTip's Tag so Popup's
-    /// MeasureText and Draw's DrawString agree (font measurement diverges
-    /// from rendered metrics if you pass two different Font instances).
+    /// Pre-allocates a Segoe UI 9pt font on the ToolTip's Tag so Popup's MeasureText and
+    /// Draw's DrawString agree (font measurement diverges from rendered metrics if you
+    /// pass two different Font instances).
     /// </summary>
     public static ToolTip MakeThemedToolTip()
     {
@@ -148,8 +30,8 @@ internal static class UiFactory
             BackColor = Theme.BgColor,
             ForeColor = Theme.FgColor,
         };
-        // Stash the font on Tag so Draw + Popup share one Font instance
-        // (cheaper than a static — the ToolTip owns disposal).
+        // Stash the font on Tag so Draw + Popup share one Font instance (cheaper than a
+        // static — the ToolTip owns disposal).
         var font = new Font(UiTokens.PrimaryFont, 9f);
         tip.Tag = font;
         tip.Disposed += (_, _) => font.Dispose();
@@ -159,22 +41,18 @@ internal static class UiFactory
 
         tip.Popup += (s, e) =>
         {
-            // PopupEventArgs doesn't carry the tip text directly — it gives
-            // us the associated control and expects the size back. Pull the
-            // text from the ToolTip itself for the measurement.
+            // PopupEventArgs doesn't carry the tip text directly — pull it from the
+            // ToolTip itself for the measurement.
             string text = tip.GetToolTip(e.AssociatedControl) ?? "";
             var sz = TextRenderer.MeasureText(text, font);
             e.ToolTipSize = new Size(sz.Width + 2 * padX, sz.Height + 2 * padY);
         };
         tip.Draw += (s, e) =>
         {
-            // Both GDI objects MUST be in `using` — Draw fires on every
-            // tooltip repaint, and ToolTip.Show on a moving mouse can
-            // repaint many times per second. The first port leaked one
-            // SolidBrush handle per paint (verifier catch, 2026-05-17);
-            // hovering tooltips for a long Settings session would
-            // accumulate enough handles to silently exhaust the per-
-            // process GDI cap and make tooltips stop painting entirely.
+            // Both GDI objects MUST be in `using` — Draw fires on every tooltip repaint,
+            // and ToolTip.Show on a moving mouse can repaint many times per second. The
+            // first port leaked one SolidBrush handle per paint (verifier catch,
+            // 2026-05-17); a long Settings session would exhaust the per-process GDI cap.
             using var bg = new SolidBrush(Theme.BgColor);
             using var border = new Pen(Theme.DividerColor);
             e.Graphics.FillRectangle(bg, e.Bounds);
@@ -188,15 +66,4 @@ internal static class UiFactory
         };
         return tip;
     }
-
-    public static TextBox MakeClickableDisplay(int width, int x, int y) => new()
-    {
-        ReadOnly = true,
-        BackColor = Theme.EditBgColor,
-        ForeColor = Theme.FgColor,
-        BorderStyle = BorderStyle.FixedSingle,
-        Cursor = Cursors.Hand,
-        Width = width,
-        Location = new Point(x, y),
-    };
 }
