@@ -82,14 +82,13 @@ internal sealed class SettingsDialog : Form
         StartPosition = FormStartPosition.CenterScreen;
         BackColor = Theme.BgColor;
         ForeColor = Theme.FgColor;
-        // 96-DPI design baseline BEFORE Font + AutoScaleMode (order load-bearing) so
-        // PerformAutoScale reads container metrics + field widths as 96-DPI design
-        // pixels and scales them proportionally at 125%/150%. The layout is relational
-        // (no absolute positions), so there is nothing for the scale to mis-place. The
-        // form's ClientSize is fitted to the content stack in OnShown (post-autoscale),
-        // so the window is exactly content-sized at every DPI — no dead band, no clip.
-        AutoScaleDimensions = new SizeF(96F, 96F);
-        AutoScaleMode = AutoScaleMode.Dpi;
+        // DPI scaling is done explicitly in OnLoad (UiLayout.ApplyDpi + content-fit) rather
+        // than by the framework: AutoScaleMode.Dpi under PerMonitorV2 scales point-fonts but
+        // NOT the pixel margins/field widths inside layout containers (and inconsistently
+        // between forms), which left 150% proportionally tighter than 100% — clipped fields,
+        // compressed spacing. None = no framework scaling; point-fonts still grow on their
+        // own, and ApplyDpi scales every pixel literal so 150% is exactly 100% x 1.5.
+        AutoScaleMode = AutoScaleMode.None;
         Font = UiLayout.BodyFont;
 
         _stack = new UiLayout.Stack(this);
@@ -877,11 +876,13 @@ internal sealed class SettingsDialog : Form
 
     protected override void OnLoad(EventArgs e)
     {
-        base.OnLoad(e);   // PerformAutoScale has run — child controls are device-scaled
-        // Fit the dialog to its content at the realized DPI, before the first paint (no
-        // visible resize). Width = the design width scaled to the device (explicit, so it
-        // is correct regardless of auto-scale timing); height = the laid-out content height
-        // at that width (ground truth — PreferredSize underestimates a Percent-column TLP).
+        base.OnLoad(e);
+        // Scale every pixel literal (margins, paddings, fixed field/button widths) by the
+        // device factor so the whole layout is 100% x factor — nothing reflows, it just
+        // scales. Then fit the dialog: width = the scaled design width; height = the
+        // laid-out content height at that width (ground truth — PreferredSize underestimates
+        // a Percent-column TLP). Done before the first paint → no visible resize.
+        UiLayout.ApplyDpi(_stack.Root);
         int w = LogicalToDeviceUnits(DesignClientWidth);
         ClientSize = new Size(w, ClientSize.Height);
         _stack.Root.PerformLayout();

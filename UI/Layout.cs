@@ -321,6 +321,70 @@ internal static class UiLayout
         flow.Controls.Add(field);
         return flow;
     }
+
+    /// <summary>
+    /// Explicit, deterministic DPI scaling for a dialog built with this kit — run ONCE in
+    /// OnLoad (after the handle exists, before the first paint). The dialogs use
+    /// <c>AutoScaleMode.None</c> because <c>AutoScaleMode.Dpi</c> (under PerMonitorV2) scales
+    /// point-fonts but NOT the pixel Margins/Paddings or fixed control Widths inside layout
+    /// containers — and inconsistently between forms — leaving 150% proportionally tighter
+    /// than 100% (numeric/combo text clipped, spacing compressed, some frames unscaled).
+    ///
+    /// Here every pixel literal is scaled by the device factor so 150% is EXACTLY 100% x 1.5
+    /// (nothing reflows — it just scales, the Spotify/Word bar). AutoSize controls (labels,
+    /// checkboxes) already grow via their point-fonts and are left alone. No-op at 100%
+    /// (LogicalToDeviceUnits is the identity there), so it cannot regress the 100% layout.
+    /// </summary>
+    public static void ApplyDpi(Control root)
+    {
+        if (root.DeviceDpi == 96) return;   // identity at 100% — leave the layout untouched
+        if (root is TableLayoutPanel or FlowLayoutPanel or Panel)
+            root.Padding = ScalePad(root.Padding, root);
+        ScaleChildren(root, root);
+    }
+
+    private static void ScaleChildren(Control parent, Control dpi)
+    {
+        foreach (Control c in parent.Controls)
+        {
+            // Margins drive inter-row spacing — AutoScale leaves them at design px, so scale
+            // every one (this is what keeps 150% spacing proportional to 100%).
+            c.Margin = ScalePad(c.Margin, dpi);
+            switch (c)
+            {
+                case NumericUpDown nud:
+                    nud.Width = dpi.LogicalToDeviceUnits(nud.Width);
+                    nud.MinimumSize = new Size(dpi.LogicalToDeviceUnits(nud.MinimumSize.Width),
+                                               dpi.LogicalToDeviceUnits(nud.MinimumSize.Height));
+                    break;
+                case ComboBox cb:
+                    cb.Width = dpi.LogicalToDeviceUnits(cb.Width);
+                    break;
+                case Button b when !b.AutoSize:
+                    b.Size = new Size(dpi.LogicalToDeviceUnits(b.Width), dpi.LogicalToDeviceUnits(b.Height));
+                    break;
+                case TableLayoutPanel or FlowLayoutPanel:
+                    c.Padding = ScalePad(c.Padding, dpi);
+                    break;
+                case Panel pnl:
+                    pnl.Padding = ScalePad(pnl.Padding, dpi);
+                    // A fixed (non-Auto, non-docked) Panel is a sized element (e.g. the
+                    // progress-bar track) — scale its box. AutoSize/docked panels follow
+                    // their content or parent and are left alone.
+                    if (!pnl.AutoSize && pnl.Dock == DockStyle.None)
+                        pnl.Size = new Size(dpi.LogicalToDeviceUnits(pnl.Width), dpi.LogicalToDeviceUnits(pnl.Height));
+                    break;
+            }
+            // Recurse into containers, but not into a leaf field's own internals (a
+            // NumericUpDown's edit/buttons, a ComboBox's edit, a TextBox).
+            if (c is not (NumericUpDown or ComboBox or Button or TextBox))
+                ScaleChildren(c, dpi);
+        }
+    }
+
+    private static Padding ScalePad(Padding p, Control d) => new(
+        d.LogicalToDeviceUnits(p.Left), d.LogicalToDeviceUnits(p.Top),
+        d.LogicalToDeviceUnits(p.Right), d.LogicalToDeviceUnits(p.Bottom));
 }
 
 /// <summary>

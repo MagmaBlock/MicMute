@@ -21,6 +21,9 @@ internal sealed class UpdateDialog : Form
     private readonly Panel _progressFill;
     private readonly Button _btnAction;
     private readonly Button _btnCancel;
+    private readonly TableLayoutPanel _root;
+    private const int DesignW = 420;   // 96-DPI design client size; scaled to device in OnLoad
+    private const int DesignH = 180;
     private CancellationTokenSource _cts;
 
     // In-flight gate — prevents parallel update chains on rapid double-click (A7-F15).
@@ -66,14 +69,12 @@ internal sealed class UpdateDialog : Form
         TopMost = true;
         BackColor = Theme.BgColor;
         ForeColor = Theme.FgColor;
-        // Pin design baseline to 96 DPI BEFORE setting AutoScaleMode so every
-        // literal `new Size(...)` / `new Point(...)` below is interpreted as
-        // 96-DPI design pixels regardless of which monitor first realizes the
-        // form. Without the pair, AutoScaleDimensions defaults to the first
-        // monitor's DPI and the dialog clips on 125%/150% displays.
-        AutoScaleDimensions = new SizeF(96F, 96F);
-        AutoScaleMode = AutoScaleMode.Dpi;
-        ClientSize = new Size(420, 180);
+        // DPI scaling is explicit (OnLoad: UiLayout.ApplyDpi + a device-scaled ClientSize) —
+        // AutoScaleMode.Dpi under PerMonitorV2 left this dialog's frame + fixed controls
+        // unscaled at 150% (see SettingsDialog for the full rationale). None = no framework
+        // scaling; point-fonts still grow, and ApplyDpi scales every pixel literal.
+        AutoScaleMode = AutoScaleMode.None;
+        ClientSize = new Size(DesignW, DesignH);
 
         _boldFont = new Font(UiTokens.PrimaryFont, 9.5f, FontStyle.Bold);
         _italicFont = new Font(UiTokens.PrimaryFont, 7.5f, FontStyle.Italic);
@@ -146,7 +147,7 @@ internal sealed class UpdateDialog : Form
         buttons.Controls.Add(_btnAction);
         buttons.Controls.Add(_btnCancel);
 
-        var root = new TableLayoutPanel
+        _root = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
@@ -163,11 +164,11 @@ internal sealed class UpdateDialog : Form
                 new RowStyle(SizeType.AutoSize),       // buttons
             },
         };
-        root.Controls.Add(_lblStatus, 0, 0);
-        root.Controls.Add(_lblDetail, 0, 1);
-        root.Controls.Add(_progressOuter, 0, 2);
-        root.Controls.Add(buttons, 0, 4);
-        Controls.Add(root);
+        _root.Controls.Add(_lblStatus, 0, 0);
+        _root.Controls.Add(_lblDetail, 0, 1);
+        _root.Controls.Add(_progressOuter, 0, 2);
+        _root.Controls.Add(buttons, 0, 4);
+        Controls.Add(_root);
 
         _marqueeTimer = new System.Windows.Forms.Timer { Interval = 30 };
         _marqueeTimer.Tick += (_, _) =>
@@ -1018,6 +1019,16 @@ internal sealed class UpdateDialog : Form
     {
         base.OnHandleCreated(e);
         Theme.ApplyWindowChrome(this);
+    }
+
+    protected override void OnLoad(EventArgs e)
+    {
+        base.OnLoad(e);
+        // Scale every pixel literal (margins, progress track, button sizes) by the device
+        // factor and set the client size to the scaled design size, so 150% is exactly
+        // 100% x factor. Before the first paint → no visible resize.
+        UiLayout.ApplyDpi(_root);
+        ClientSize = new Size(LogicalToDeviceUnits(DesignW), LogicalToDeviceUnits(DesignH));
     }
 
     protected override void Dispose(bool disposing)

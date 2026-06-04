@@ -92,15 +92,10 @@ Right-click the tray icon → ""Mic Source"" to choose which microphone MicMute 
         ClientSize = new Size(540, 560);
         MinimumSize = new Size(440, 360);
         StartPosition = FormStartPosition.CenterScreen;
-        // Pin design baseline to 96 DPI BEFORE setting AutoScaleMode so every
-        // literal `new Size(...)` / `new Point(...)` is interpreted as 96-DPI
-        // design pixels, regardless of which monitor first realizes the form.
-        // Without this pair, AutoScaleDimensions defaults to whatever the
-        // first monitor reports; on a 125%/150% laptop the form then gets
-        // double-scaled and controls clip. (v2.1.10 set only AutoScaleMode —
-        // incomplete; closed in v2.1.14.)
-        AutoScaleDimensions = new SizeF(96F, 96F);
-        AutoScaleMode = AutoScaleMode.Dpi;
+        // DPI scaling is explicit (OnLoad scales ClientSize + the text-box bounds) — see
+        // SettingsDialog for why AutoScaleMode.Dpi is not relied on under PerMonitorV2. The
+        // point-based fonts grow on their own; only the pixel box needs scaling.
+        AutoScaleMode = AutoScaleMode.None;
 
         // A5-F12: named constants for margin / gap eliminate magic numbers.
         const int margin = 18;
@@ -205,6 +200,20 @@ Right-click the tray icon → ""Mic Source"" to choose which microphone MicMute 
     {
         base.OnHandleCreated(e);
         Theme.ApplyWindowChrome(this);
+    }
+
+    protected override void OnLoad(EventArgs e)
+    {
+        base.OnLoad(e);
+        // Scale the (only) pixel box — window size + the text-box inset — by the device
+        // factor so 150% is exactly 100% x factor. The RichTextBox is anchored on all sides,
+        // so this also sets its resize baseline. Point-fonts already grow on their own.
+        if (DeviceDpi == 96) return;
+        int m = LogicalToDeviceUnits(18);
+        int t = LogicalToDeviceUnits(14);
+        MinimumSize = new Size(LogicalToDeviceUnits(440), LogicalToDeviceUnits(360));
+        ClientSize = new Size(LogicalToDeviceUnits(540), LogicalToDeviceUnits(560));
+        _textBox.Bounds = new Rectangle(m, t, ClientSize.Width - 2 * m, ClientSize.Height - t - m);
     }
 
     public static void ShowInstance()
