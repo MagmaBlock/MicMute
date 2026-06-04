@@ -107,7 +107,10 @@ internal sealed class MenuRenderer : ToolStripProfessionalRenderer
     {
         var bounds = new Rectangle(Point.Empty, e.Item.Size);
         int y = bounds.Height / 2;
-        e.Graphics.DrawLine(SeparatorPen, bounds.Left + 4, y, bounds.Right - 4, y);
+        // Owner-draw inset runs in device pixels — scale it so the separator keeps the
+        // same proportional margin at 125%/150% (item heights are framework-scaled).
+        int pad = e.ToolStrip.LogicalToDeviceUnits(4);
+        e.Graphics.DrawLine(SeparatorPen, bounds.Left + pad, y, bounds.Right - pad, y);
     }
 
     protected override void OnRenderItemCheck(ToolStripItemImageRenderEventArgs e)

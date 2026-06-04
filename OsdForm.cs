@@ -119,6 +119,11 @@ internal sealed class OsdForm : Form
             if (_disposed || IsDisposed) return;
             if (string.IsNullOrWhiteSpace(displayText)) return;
 
+            // Force the handle so DeviceDpi (and thus LogicalToDeviceUnits below) is the
+            // real monitor scale on the very first toast — otherwise a pre-handle measure
+            // falls back to 96 and the pill renders undersized at 125%/150% until reshown.
+            if (!IsHandleCreated) { _ = Handle; }
+
             // A5-F10: use TextRenderer.MeasureText instead of CreateGraphics()+MeasureString.
             // CreateGraphics() allocates a short-lived GDI DC that can be missed by the
             // using-block if the form handle isn't created yet (ISR window).  TextRenderer
@@ -127,7 +132,9 @@ internal sealed class OsdForm : Form
             // a short pill label — accepted per design review.
             {
                 _labelSize = TextRenderer.MeasureText(displayText, s_labelFont);
-                int w = 10 + 12 + _labelSize.Width + 12;
+                // Paddings scale with DPI; _labelSize is already device-correct (MeasureText
+                // reads the current DC). 34 = left pad 10 + dot gutter 12 + right pad 12.
+                int w = LogicalToDeviceUnits(34) + _labelSize.Width;
                 // Pill height must clear the rendered text + padding at any
                 // display scale. At 100% scale 9pt Segoe UI is ~15px tall and
                 // 28px gave generous breathing room; at 175% scale it renders
@@ -136,7 +143,7 @@ internal sealed class OsdForm : Form
                 // DC), so deriving height from it keeps the pill proportional
                 // across every monitor scale. Floor at 28 to preserve the
                 // intended visual weight at 100%.
-                int h = Math.Max(28, _labelSize.Height + 10);
+                int h = Math.Max(LogicalToDeviceUnits(28), _labelSize.Height + LogicalToDeviceUnits(10));
 
                 // Default anchor: bottom-right corner of the working area.
                 // WorkingArea already excludes the taskbar regardless of its
@@ -144,8 +151,8 @@ internal sealed class OsdForm : Form
                 // taskbar orientation.
                 var screen = Screen.PrimaryScreen ?? Screen.AllScreens[0];
                 var workArea = screen.WorkingArea;
-                int xPos = workArea.Right - w - 12;
-                int yPos = workArea.Bottom - h - 8;
+                int xPos = workArea.Right - w - LogicalToDeviceUnits(12);
+                int yPos = workArea.Bottom - h - LogicalToDeviceUnits(8);
 
                 // Try precise Shell_TrayWnd anchoring; accept only if it
                 // stays inside the working area. Top/left/right taskbars
@@ -155,8 +162,8 @@ internal sealed class OsdForm : Form
                 if (trayHwnd != 0 &&
                     NativeMethods.GetWindowRect(trayHwnd, out var rect))
                 {
-                    int anchoredX = rect.Right - w - 12;
-                    int anchoredY = rect.Top - h - 8;
+                    int anchoredX = rect.Right - w - LogicalToDeviceUnits(12);
+                    int anchoredY = rect.Top - h - LogicalToDeviceUnits(8);
                     if (anchoredY >= workArea.Top &&
                         anchoredX >= workArea.Left &&
                         anchoredX + w <= workArea.Right)
@@ -206,8 +213,11 @@ internal sealed class OsdForm : Form
         var prev = g.SmoothingMode;
         g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
         var dotBrush = _showMuted ? s_mutedDotBrush : s_activeDotBrush;
-        int dotY = (ClientSize.Height - DotSize) / 2;
-        g.FillEllipse(dotBrush, 11, dotY, DotSize, DotSize);
+        // Owner-draw paint geometry runs in device pixels and is never auto-scaled —
+        // scale the dot size + inset by DPI so it stays proportional at 125%/150%.
+        int dot = LogicalToDeviceUnits(DotSize);
+        int dotY = (ClientSize.Height - dot) / 2;
+        g.FillEllipse(dotBrush, LogicalToDeviceUnits(11), dotY, dot, dot);
         g.SmoothingMode = prev;
 
         string label = _customText ?? (_showMuted ? s_mutedLabel : s_activeLabel);
@@ -216,7 +226,7 @@ internal sealed class OsdForm : Form
         // the previous y=5 left the text top-aligned at higher scales. Use the
         // cached label height to centre regardless of current pill height.
         int textY = Math.Max(0, (ClientSize.Height - _labelSize.Height) / 2);
-        g.DrawString(label, s_labelFont, s_textBrush, 24, textY);
+        g.DrawString(label, s_labelFont, s_textBrush, LogicalToDeviceUnits(24), textY);
     }
 
     protected override void Dispose(bool disposing)
