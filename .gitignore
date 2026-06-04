@@ -54,6 +54,9 @@ MASTER_BUGLIST.md
 publish/
 .code-graph/
 
+# DPI verification renders (Phase 0 harness output — local-only)
+_dpi-diag/
+
 # Workspace scaffolding — never commit (defense-in-depth, prevents leaks of internal handoffs/audit prompts)
 *_HANDOFF.md
 *_PROMPT*.md

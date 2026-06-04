@@ -10,6 +10,17 @@ internal static class Program
         // leaves a log record instead of dying silently.
         InstallGlobalExceptionHandlers();
 
+#if DEBUG
+        // DPI render harness — bypasses the single-instance mutex so a render can
+        // run while a normal MicMute is in the tray. DEBUG-only (out of Release).
+        if (args.Contains("--diag-render-form"))
+        {
+            // Hard-exit: UpdateDialog's Shown handler starts an async GitHub check
+            // whose continuation can outlive Run() and keep the process alive.
+            Environment.Exit(DiagRender.Run(args));
+        }
+#endif
+
         bool isAfterUpdate = args.Contains("--after-update");
         // --after-theme-restart: dispatched by TrayApp.TryAutoRestartForTheme
         // when the user changes the Theme dropdown in Settings. Same mutex-
