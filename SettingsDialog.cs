@@ -219,10 +219,10 @@ internal sealed class SettingsDialog : Form
             new Control[] { lnkGitHub, lnkHelp, lnkUpdate },
             new Control[] { btnOK, btnApply, btnCancel }));
 
-        // Width is the design width — AutoScaleMode.Dpi scales it with the form on a
-        // 125%/150% monitor. Height is fitted to the content in OnLoad (after auto-scale,
-        // with real handle font metrics, before the first paint), so there is no
-        // resize-after-show flicker and no ctor-time underestimate that clips the footer.
+        // Placeholder client size; OnLoad sets the real one — width = the design width
+        // scaled to the device, height = the laid-out content height — with real handle
+        // font metrics, before the first paint (no flicker, no ctor-time underestimate
+        // that would clip the footer). See OnLoad + UiLayout.ApplyDpi.
         ClientSize = new Size(DesignClientWidth, 400);
     }
 

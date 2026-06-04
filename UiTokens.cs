@@ -12,17 +12,6 @@ using System.Drawing;
 /// </summary>
 internal static class UiTokens
 {
-    // ── Dialog ──────────────────────────────────────────────────────────
-    public const int DialogMargin           = 16;
-    public const int SettingsDialogWidth    = 520;
-    public const int SettingsSectionRight   = 504;   // SettingsDialogWidth - DialogMargin
-    public const int SectionSeparatorWidth  = 488;   // SettingsSectionRight - DialogMargin
-
-    // ── Row / cell spacing ──────────────────────────────────────────────
-    public const int RowGap                 = 4;
-    public const int ColumnGap              = 12;
-    public const int Indent                 = 28;
-
     // ── Buttons ─────────────────────────────────────────────────────────
     public const int BtnHeight              = 28;
     public const int BtnActionWidth         = 80;    // OK / Cancel / Apply
@@ -30,10 +19,6 @@ internal static class UiTokens
     public const int BtnIconWidth           = 22;    // ⋯, ×, single glyph
     public const int BtnIconHeight          = 23;    // matches TextBox row height — icon buttons live inline with text fields, not in an action row
     public const int BtnGap                 = 6;
-
-    // ── Compact grid cells (hotkeys + custom files) ─────────────────────
-    public const int CellLabelWidth         = 76;
-    public const int CellFileLabelWidth     = 88;    // "Unmute sound" needs a touch more
 
     // ── Dropdowns / numeric inputs ──────────────────────────────────────
     // Default ComboBox width for the right-anchored dropdowns on settings rows
@@ -75,7 +60,6 @@ internal static class UiTokens
     public const string PrimaryFont         = "Segoe UI";
     public const string SemiboldFont        = "Segoe UI Semibold";
     public const float  DialogFontSize      = 9.5f;
-    public const float  ModalFontSize       = 10f;
     public const float  SectionHeaderSize   = 9.5f;
     public const float  HelpTitleSize       = 13.5f;
     public const float  HelpHeaderSize      = 10.75f;

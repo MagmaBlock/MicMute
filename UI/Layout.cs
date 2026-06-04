@@ -409,7 +409,7 @@ internal static class UiLayout
 /// MicMute's themed control palette without any <c>Size(w, h)</c> or <c>Location</c>. Heights
 /// come from the font (single-line inputs auto-height at any DPI); only WIDTHS are literal,
 /// and width never clips text vertically. Place each returned control with a
-/// <see cref="Layout.Section"/> row method or a <see cref="Layout.CompactCell"/>.
+/// <see cref="UiLayout.Section"/> row method or a <see cref="UiLayout.CompactCell"/>.
 /// </summary>
 internal static class Fields
 {

@@ -80,8 +80,8 @@ internal sealed class UpdateDialog : Form
         _italicFont = new Font(UiTokens.PrimaryFont, 7.5f, FontStyle.Italic);
 
         // Relational layout — a single-column table fills the dialog; each row centers its
-        // content (Anchor=None). No absolute positions; AutoScaleMode.Dpi scales the column
-        // and the fixed progress/button sizes together at 125%/150%.
+        // content (Anchor=None). No absolute positions; OnLoad's UiLayout.ApplyDpi scales the
+        // fixed progress/button sizes + the client size together at 125%/150%.
         _lblStatus = new Label
         {
             Text = "Checking GitHub for new version...",
@@ -173,7 +173,8 @@ internal sealed class UpdateDialog : Form
         _marqueeTimer = new System.Windows.Forms.Timer { Interval = 30 };
         _marqueeTimer.Tick += (_, _) =>
         {
-            const int step = 4, barW = 80;
+            // Scaled to the device so the bouncing bar stays proportional at 125%/150%.
+            int step = LogicalToDeviceUnits(4), barW = LogicalToDeviceUnits(80);
             if (_marqueeForward) _marqueePos += step; else _marqueePos -= step;
             if (_marqueePos + barW >= _progressOuter.Width) _marqueeForward = false;
             if (_marqueePos <= 0) _marqueeForward = true;
