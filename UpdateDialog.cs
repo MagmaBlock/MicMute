@@ -78,57 +78,96 @@ internal sealed class UpdateDialog : Form
         _boldFont = new Font(UiTokens.PrimaryFont, 9.5f, FontStyle.Bold);
         _italicFont = new Font(UiTokens.PrimaryFont, 7.5f, FontStyle.Italic);
 
+        // Relational layout — a single-column table fills the dialog; each row centers its
+        // content (Anchor=None). No absolute positions; AutoScaleMode.Dpi scales the column
+        // and the fixed progress/button sizes together at 125%/150%.
         _lblStatus = new Label
         {
             Text = "Checking GitHub for new version...",
-            Location = new Point(20, 20),
-            Size = new Size(370, 24),
+            AutoSize = true,
             Font = _boldFont,
-            TextAlign = ContentAlignment.MiddleCenter
+            Anchor = AnchorStyles.None,
+            Margin = new Padding(0, 0, 0, 6),
         };
-        Controls.Add(_lblStatus);
 
         _lblDetail = new Label
         {
             Text = "",
-            Location = new Point(20, 48),
-            Size = new Size(370, 20),
+            AutoSize = true,
             ForeColor = Theme.DimColor,
             Font = _italicFont,
-            TextAlign = ContentAlignment.MiddleCenter
+            Anchor = AnchorStyles.None,
+            Margin = new Padding(0, 0, 0, 10),
         };
-        Controls.Add(_lblDetail);
 
         _progressOuter = new Panel
         {
-            Location = new Point(30, 80),
             Size = new Size(350, 18),
             BackColor = Theme.EditBgColor,
-            BorderStyle = BorderStyle.None
+            BorderStyle = BorderStyle.None,
+            Anchor = AnchorStyles.None,
+            Margin = new Padding(0),
         };
         _progressFill = new Panel
         {
             Location = new Point(0, 0),
             Size = new Size(0, 18),
-            BackColor = UiTokens.SuccessGreen
+            BackColor = UiTokens.SuccessGreen,
         };
         _progressOuter.Controls.Add(_progressFill);
-        Controls.Add(_progressOuter);
 
-        // A5-F05: port to UiFactory for consistent button height (BtnHeight=28, not 32).
-        _btnAction = UiFactory.MakeWideButton("Upgrade Now", 145, BtnRowY());
+        _btnAction = Fields.Button("Upgrade Now", UiTokens.BtnWideWidth);
         _btnAction.Visible = false;
         _btnAction.Click += OnActionClick;
-        Controls.Add(_btnAction);
 
-        _btnCancel = UiFactory.MakeActionButton("Cancel", 275, BtnRowY());
+        _btnCancel = Fields.Action("Cancel");
         _btnCancel.Click += (_, _) =>
         {
             _cts?.Cancel();
             DialogResult = DialogResult.Cancel;
             Close();
         };
-        Controls.Add(_btnCancel);
+
+        // Buttons live in a centered flow — toggling _btnAction.Visible re-centers the
+        // remaining Cancel/OK automatically (a FlowLayoutPanel lays out only visible
+        // children), so no dynamic Location math is needed.
+        _btnAction.Margin = new Padding(0, 0, UiTokens.BtnGap, 0);
+        _btnCancel.Margin = new Padding(0);
+        var buttons = new FlowLayoutPanel
+        {
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            WrapContents = false,
+            FlowDirection = FlowDirection.LeftToRight,
+            Anchor = AnchorStyles.None,
+            BackColor = Color.Transparent,
+            Margin = new Padding(0),
+        };
+        buttons.Controls.Add(_btnAction);
+        buttons.Controls.Add(_btnCancel);
+
+        var root = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 5,
+            BackColor = Color.Transparent,
+            Padding = new Padding(16, 16, 16, 16),
+            ColumnStyles = { new ColumnStyle(SizeType.Percent, 100f) },
+            RowStyles =
+            {
+                new RowStyle(SizeType.AutoSize),       // status
+                new RowStyle(SizeType.AutoSize),       // detail
+                new RowStyle(SizeType.AutoSize),       // progress
+                new RowStyle(SizeType.Percent, 100f),  // flexible spacer pushes buttons down
+                new RowStyle(SizeType.AutoSize),       // buttons
+            },
+        };
+        root.Controls.Add(_lblStatus, 0, 0);
+        root.Controls.Add(_lblDetail, 0, 1);
+        root.Controls.Add(_progressOuter, 0, 2);
+        root.Controls.Add(buttons, 0, 4);
+        Controls.Add(root);
 
         _marqueeTimer = new System.Windows.Forms.Timer { Interval = 30 };
         _marqueeTimer.Tick += (_, _) =>
@@ -138,19 +177,10 @@ internal sealed class UpdateDialog : Form
             if (_marqueePos + barW >= _progressOuter.Width) _marqueeForward = false;
             if (_marqueePos <= 0) _marqueeForward = true;
             _progressFill.Location = new Point(_marqueePos, 0);
-            _progressFill.Size = new Size(barW, 18);
+            _progressFill.Size = new Size(barW, _progressOuter.Height);
         };
 
         Shown += async (_, _) => await CheckForUpdateAsync();
-    }
-
-    // A5-F06: runtime Y for button row — keeps it consistent with ClientSize.
-    private int BtnRowY() => ClientSize.Height - UiTokens.BtnHeight - UiTokens.DialogMargin;
-
-    // A5-F06: center a single button horizontally at runtime.
-    private void CenterSingleButton(Button btn)
-    {
-        btn.Location = new Point((ClientSize.Width - btn.Width) / 2, BtnRowY());
     }
 
     private static HttpClient CreateHttpClient()
@@ -228,7 +258,6 @@ internal sealed class UpdateDialog : Form
             _lblDetail.Text = "Use:  winget upgrade itsnateai.MicMute";
             _btnAction.Visible = false;
             _btnCancel.Text = "OK";
-            CenterSingleButton(_btnCancel);
             return;
         }
 
@@ -328,7 +357,7 @@ internal sealed class UpdateDialog : Form
     private void ShowVersionComparison()
     {
         _marqueeTimer.Stop();
-        _progressFill.Size = new Size(0, 18);
+        _progressFill.Size = new Size(0, _progressOuter.Height);
         _progressFill.Location = new Point(0, 0);
 
         var localVersion = Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.0";
@@ -354,18 +383,15 @@ internal sealed class UpdateDialog : Form
             _lblStatus.Text = "A new version is available!";
             _lblStatus.ForeColor = Theme.FgColor;
             _btnAction.Text = "Upgrade Now";
-            _btnAction.Visible = true;
-            _btnAction.Location = new Point(145, BtnRowY());
+            _btnAction.Visible = true;       // the centered button flow shows [Upgrade Now][Cancel]
             _btnCancel.Text = "Cancel";
-            _btnCancel.Location = new Point(275, BtnRowY());
         }
         else
         {
             _lblStatus.Text = "You're on the latest version!";
             _lblStatus.ForeColor = Theme.FgColor;
-            _btnAction.Visible = false;
+            _btnAction.Visible = false;       // flow re-centers on the lone OK button
             _btnCancel.Text = "OK";
-            CenterSingleButton(_btnCancel);
         }
     }
 
@@ -723,7 +749,7 @@ internal sealed class UpdateDialog : Form
                         {
                             int pct = (int)(downloaded * 100 / totalBytes);
                             _progressFill.Size = new Size(
-                                (int)(_progressOuter.Width * downloaded / totalBytes), 18);
+                                (int)(_progressOuter.Width * downloaded / totalBytes), _progressOuter.Height);
                             var dlMB = downloaded / (1024.0 * 1024.0);
                             var totalMB = totalBytes / (1024.0 * 1024.0);
                             _lblDetail.Text = totalMB < 1
@@ -765,9 +791,8 @@ internal sealed class UpdateDialog : Form
         _lblStatus.Text = message;
         _lblStatus.ForeColor = UiTokens.WarnOrange;
         _lblDetail.Text = detail;
-        _btnAction.Visible = false;
+        _btnAction.Visible = false;       // flow re-centers on the lone OK button
         _btnCancel.Text = "OK";
-        CenterSingleButton(_btnCancel);
     }
 
     // ─── Static Helpers (called from Program.cs) ────────────────
