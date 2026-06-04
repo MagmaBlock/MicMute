@@ -340,6 +340,8 @@ internal static class UiLayout
         if (root.DeviceDpi == 96) return;   // identity at 100% — leave the layout untouched
         if (root is TableLayoutPanel or FlowLayoutPanel or Panel)
             root.Padding = ScalePad(root.Padding, root);
+        if (root is TableLayoutPanel rootTlp)
+            ScaleRowStyles(rootTlp, root);
         ScaleChildren(root, root);
     }
 
@@ -363,7 +365,11 @@ internal static class UiLayout
                 case Button b when !b.AutoSize:
                     b.Size = new Size(dpi.LogicalToDeviceUnits(b.Width), dpi.LogicalToDeviceUnits(b.Height));
                     break;
-                case TableLayoutPanel or FlowLayoutPanel:
+                case TableLayoutPanel tlp:
+                    tlp.Padding = ScalePad(tlp.Padding, dpi);
+                    ScaleRowStyles(tlp, dpi);   // scale Absolute rows (e.g. the 1px section divider)
+                    break;
+                case FlowLayoutPanel:
                     c.Padding = ScalePad(c.Padding, dpi);
                     break;
                 case Panel pnl:
@@ -385,6 +391,17 @@ internal static class UiLayout
     private static Padding ScalePad(Padding p, Control d) => new(
         d.LogicalToDeviceUnits(p.Left), d.LogicalToDeviceUnits(p.Top),
         d.LogicalToDeviceUnits(p.Right), d.LogicalToDeviceUnits(p.Bottom));
+
+    // Scale Absolute row heights (the only fixed rows the kit creates are the 1px section
+    // dividers) — ApplyDpi otherwise touches Margins/Paddings/control Sizes but not the TLP
+    // RowStyles, which would leave dividers 1 device-px (too thin) at 150%. Percent/AutoSize
+    // rows and all columns are relational and need no scaling.
+    private static void ScaleRowStyles(TableLayoutPanel tlp, Control d)
+    {
+        foreach (RowStyle rs in tlp.RowStyles)
+            if (rs.SizeType == SizeType.Absolute)
+                rs.Height = d.LogicalToDeviceUnits((int)rs.Height);
+    }
 }
 
 /// <summary>

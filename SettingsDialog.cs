@@ -51,7 +51,7 @@ internal sealed class SettingsDialog : Form
     private readonly TextBox _lblIconActive;
     private ToolTip _fileRowTooltip;
 
-    // The relational content stack — the dialog sizes its ClientSize to this in OnShown.
+    // The relational content stack — the dialog sizes its ClientSize to this in OnLoad.
     private readonly UiLayout.Stack _stack;
 
     // Design (96-DPI) client width. The dialog fixes its width to this (scaled to the
