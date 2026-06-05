@@ -4,6 +4,11 @@
 
 All notable changes to MicMute are documented here.
 
+## [2.3.2] - 2026-06-04
+
+### Fixed
+- **Update dialog: long error messages no longer clip the OK button.** v2.3.1 fit the window height once, at load, in the short "Checking…" state. A long error or winget status — e.g. "Update integrity file missing. Download manually from GitHub." — wraps to two lines in the narrower 360 px window, so when one of those states replaced the short one the content outgrew the locked height and the bottom of the OK button was cut off. The height is now re-fit to the laid-out content on every state change (not just at load): short states stay compact and long messages grow the window to fit. The reserved progress-bar row still keeps the bar's show/hide from resizing the window, so the only thing that ever changes the height now is genuine text wrapping. Verified at 100% and real 150% DPI for both the resting "latest version" state and the longest error state.
+
 ## [2.3.1] - 2026-06-04
 
 ### Changed

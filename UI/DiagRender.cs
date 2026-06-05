@@ -128,15 +128,26 @@ internal static class DiagRender
 
     private static IEnumerable<string> ResolveTargets(string target) =>
         target.Equals("all", StringComparison.OrdinalIgnoreCase)
-            ? new[] { "Settings", "SettingsPtt", "Update", "Help", "Osd", "Menu" }
+            ? new[] { "Settings", "SettingsPtt", "Update", "UpdateErr", "Help", "Osd", "Menu" }
             : new[] { target };
 
     private static (int dpi, Size client, Size win) RenderOne(string name, string outDir, Screen screen) => name.ToLowerInvariant() switch
     {
         "menu" => RenderMenu(outDir, screen),
         "osd"  => RenderOsd(outDir),
+        "updateerr" => RenderUpdateErr(outDir, screen),
         _      => RenderForm(name, Build(name), outDir, screen),
     };
+
+    // The UpdateDialog in its longest error state, reached via a POST-show transition so OnLoad
+    // measured the short resting state first — this is the "short at load, long later" path that
+    // a load-time-only height fit would clip. Verifies FitToContentHeight grows the window to fit.
+    private static (int, Size, Size) RenderUpdateErr(string outDir, Screen screen)
+    {
+        var d = new UpdateDialog();
+        d.DiagPopulate();                                                  // OnLoad fits THIS short state
+        return RenderForm("UpdateErr", d, outDir, screen, d.DiagShowLongError);   // then grow to the long error
+    }
 
     private static Form Build(string name) => name switch
     {
@@ -163,7 +174,7 @@ internal static class DiagRender
         return c;
     }
 
-    private static (int, Size, Size) RenderForm(string name, Form form, string outDir, Screen screen)
+    private static (int, Size, Size) RenderForm(string name, Form form, string outDir, Screen screen, Action postShow = null)
     {
         using (form)
         {
@@ -175,6 +186,11 @@ internal static class DiagRender
             form.Opacity = 0;
             form.Location = new Point(screen.WorkingArea.X + 20, screen.WorkingArea.Y + 20);
             form.Show();
+            Pump();
+            // Drive any post-show state transition (e.g. UpdateDialog → long error) so the capture
+            // reflects a state reached AFTER OnLoad's initial fit — exercising the per-state height
+            // re-fit, not just the load-time measurement.
+            postShow?.Invoke();
             Pump();
             // A form may resize itself to fit content in OnShown (SettingsDialog does);
             // force the layout to settle before capturing so the bitmap matches the final

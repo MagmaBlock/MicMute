@@ -227,6 +227,16 @@ internal sealed class UpdateDialog : Form
         _btnAction.Visible = false;
         _btnCancel.Text = "OK";
     }
+
+    /// <summary>
+    /// Render-harness only: drive the post-show transition to the longest real error state. Called
+    /// AFTER Show (so OnLoad has already fit the window to the short initial state) — it exercises
+    /// the real "short at load, long later" path and verifies FitToContentHeight grows the window
+    /// so the wrapped 2-line message doesn't clip the OK button.
+    /// </summary>
+    internal void DiagShowLongError()
+        => ShowError("Update integrity file missing. Download manually from GitHub.",
+                     "SHA256SUMS was not found in release 2.3.1. Aborting for security.");
 #endif
 
     private static HttpClient CreateHttpClient()
@@ -304,6 +314,7 @@ internal sealed class UpdateDialog : Form
             _lblDetail.Text = "Use:  winget upgrade itsnateai.MicMute";
             _btnAction.Visible = false;
             _btnCancel.Text = "OK";
+            FitToContentHeight();
             return;
         }
 
@@ -439,6 +450,8 @@ internal sealed class UpdateDialog : Form
             _btnAction.Visible = false;       // flow re-centers on the lone OK button
             _btnCancel.Text = "OK";
         }
+
+        FitToContentHeight();   // re-fit in case a neutral-status fallback wrapped the detail line
     }
 
     // ─── Download & Apply ───────────────────────────────────────
@@ -839,6 +852,7 @@ internal sealed class UpdateDialog : Form
         _lblDetail.Text = detail;
         _btnAction.Visible = false;       // flow re-centers on the lone OK button
         _btnCancel.Text = "OK";
+        FitToContentHeight();   // long error/detail strings wrap to 2-3 lines — grow to fit, no clip
     }
 
     // ─── Static Helpers (called from Program.cs) ────────────────
@@ -1070,17 +1084,33 @@ internal sealed class UpdateDialog : Form
     {
         base.OnLoad(e);
         // Scale every pixel literal (margins, progress track, button sizes, and the Absolute
-        // progress-row height) by the device factor, then fit the window: width = the scaled
-        // design width; height = the laid-out content height at that width. The progress row is
-        // reserved Absolute and the (initially empty) detail label keeps its single-line height,
-        // so this one measurement is valid for every later state — no per-state re-fit, no clip,
-        // no dead band. Done before the first paint → no visible resize. Mirrors
-        // SettingsDialog.OnLoad.
+        // progress-row height) by the device factor, pin the width to the scaled design width,
+        // then fit the height to the laid-out content. The height is RE-FIT on every later state
+        // change (FitToContentHeight) because a long error/winget message wraps to 2-3 lines in
+        // the fixed-width form — measuring once here (in the short "Checking..." state) would clip
+        // the OK button when a taller state swaps in. Short states stay tight; long messages grow
+        // to fit. Done before the first paint → no visible initial resize.
         UiLayout.ApplyDpi(_root);
-        int w = LogicalToDeviceUnits(DesignW);
-        ClientSize = new Size(w, ClientSize.Height);
+        ClientSize = new Size(LogicalToDeviceUnits(DesignW), ClientSize.Height);
+        FitToContentHeight();
+    }
+
+    /// <summary>
+    /// Re-fit the window height to the current laid-out content (width stays fixed). Called from
+    /// OnLoad and at the end of every state change that swaps the status/detail text. The fixed-
+    /// width form wraps long messages to 2-3 lines, so content height varies by state; the reserved
+    /// Absolute progress row keeps the bar's show/hide from changing height, so this only resizes
+    /// on genuine text-wrap changes. MUST NOT be called from the per-frame download-progress
+    /// callback — the % detail is always one line, and re-fitting every frame would thrash the
+    /// window size.
+    /// </summary>
+    private void FitToContentHeight()
+    {
+        if (!IsHandleCreated) return;
         _root.PerformLayout();
-        ClientSize = new Size(w, _root.Height);
+        int h = _root.Height;
+        if (ClientSize.Height != h)
+            ClientSize = new Size(ClientSize.Width, h);
     }
 
     protected override void Dispose(bool disposing)
