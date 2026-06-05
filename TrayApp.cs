@@ -111,8 +111,7 @@ internal sealed class TrayApp : Form
             ApplyStartupMutePreference();
         }
 
-        // Tray icon. Win11 tray-icon hygiene
-        // (snippet: _.claude/_templates/snippets/csharp/tray-icon-promoter.md):
+        // Tray icon. Win11 tray-icon hygiene:
         //   1. Sweep zombies left behind by prior versioned WinGet installs and
         //      .NET single-file extraction-cache churn — without this, the user
         //      accumulates "N MicMutes" cruft in Settings → Other system tray
@@ -468,7 +467,6 @@ internal sealed class TrayApp : Form
     /// <summary>
     /// Drive the TrayIconPromoter retry timer until our subkey is identified or
     /// the 10 s budget elapses. Idempotent — Phase 1 no-ops once IsPromoted=1.
-    /// Snippet: _.claude/_templates/snippets/csharp/tray-icon-promoter.md.
     /// </summary>
     private void StartTrayIconPromotion(HashSet<string> baseline)
     {

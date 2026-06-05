@@ -10,7 +10,7 @@ namespace MicMute;
 /// layout is *relational*, so 100% and 150% are proportionally identical with zero
 /// pixel literals to mis-scale.
 ///
-/// This is EQSwitch's CardLayout technique (proven, real-150%-verified) adapted to
+/// This is a CardLayout technique (proven, real-150%-verified) adapted to
 /// MicMute's FLAT section aesthetic — no accent-bar cards, transparent bodies, the same
 /// bold-header-plus-divider look the dialog already shipped. MicMute is PerMonitorV2, so
 /// the framework scales control Bounds via PerformAutoScale; the only literals are field

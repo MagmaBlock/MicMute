@@ -32,6 +32,7 @@ CLAUDE.md
 .audit/
 AUDIT_PLAN.md
 MASTER_BUGLIST.md
+docs/superpowers/
 
 # IDE / Editor
 .vscode/

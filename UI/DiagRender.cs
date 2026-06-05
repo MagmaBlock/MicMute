@@ -5,11 +5,11 @@ namespace MicMute;
 
 /// <summary>
 /// DEBUG-only offscreen render harness for DPI verification — Phase 0 of the
-/// scale-independence rebuild (see docs/superpowers/plans/2026-06-04-dpi-scaling-rebuild.md).
+/// scale-independence rebuild.
 ///
 /// Renders each user-facing surface to a PNG at a CHOSEN monitor's DPI, plus a
 /// manifest of DeviceDpi + ClientSize, so a 100% capture (a 96-DPI monitor) and a
-/// 150% capture (a 144-DPI monitor — Tiny11, or a 150% host display) can be diffed.
+/// 150% capture (a 144-DPI monitor, or a 150% host display) can be diffed.
 /// The render is ground truth — it beats any static "this will/won't clip" reasoning.
 ///
 /// Under PerMonitorV2 a window's DeviceDpi reflects whichever monitor it sits on, so

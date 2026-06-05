@@ -40,8 +40,6 @@ namespace MicMute;
 /// 22H2, 23H2, 24H2, and 25H2. All registry interaction is wrapped in
 /// try/catch so a schema change in a future build silently no-ops
 /// instead of crashing.
-///
-/// Canonical snippet: _.claude/_templates/snippets/csharp/tray-icon-promoter.md
 /// </summary>
 internal static class TrayIconPromoter
 {
