@@ -31,8 +31,13 @@ internal static class DiagRender
 {
     private static readonly System.Text.StringBuilder s_log = new();
 
+    /// <summary>True while the harness is driving renders — surfaces (e.g. UpdateDialog)
+    /// check this to skip live network work and stay in their harness-seeded state.</summary>
+    internal static bool Active;
+
     public static int Run(string[] args)
     {
+        Active = true;
         string target = ArgVal(args, "--diag-render-form") ?? "all";
         string outDir = ArgVal(args, "--out") ?? Path.Combine(Path.GetTempPath(), "micmute-diag");
         string theme = ArgVal(args, "--theme");                       // null = config default (System)
@@ -137,13 +142,17 @@ internal static class DiagRender
     {
         "Settings"    => new SettingsDialog(DefaultConfig(ptt: false), () => { }),
         "SettingsPtt" => new SettingsDialog(DefaultConfig(ptt: true), () => { }),
-        "Update"      => new UpdateDialog(),
+        "Update"      => Populated(new UpdateDialog()),
         // HelpWindow has a private ctor (singleton). Construct directly via the
         // nonPublic Activator overload so the harness needs no production-side
         // factory — zero edits to HelpWindow.cs.
         "Help"        => (Form)Activator.CreateInstance(typeof(HelpWindow), nonPublic: true),
         _ => throw new ArgumentException($"unknown surface '{name}'"),
     };
+
+    // Seed the UpdateDialog's settled "latest version" resting state so the capture is
+    // deterministic (the live GitHub check is skipped via DiagRender.Active).
+    private static Form Populated(UpdateDialog d) { d.DiagPopulate(); return d; }
 
     private static Config DefaultConfig(bool ptt)
     {

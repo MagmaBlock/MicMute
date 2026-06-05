@@ -22,8 +22,9 @@ internal sealed class UpdateDialog : Form
     private readonly Button _btnAction;
     private readonly Button _btnCancel;
     private readonly TableLayoutPanel _root;
-    private const int DesignW = 420;   // 96-DPI design client size; scaled to device in OnLoad
-    private const int DesignH = 180;
+    private const int DesignW = 360;       // 96-DPI design client WIDTH; height is fit to content in OnLoad
+    private const int ProgressBarW = 312;  // progress track width (centered in the 360-wide form)
+    private const int ProgressBarH = 18;   // progress track height; also the reserved (Absolute) progress-row height
     private CancellationTokenSource _cts;
 
     // In-flight gate — prevents parallel update chains on rapid double-click (A7-F15).
@@ -74,7 +75,10 @@ internal sealed class UpdateDialog : Form
         // unscaled at 150% (see SettingsDialog for the full rationale). None = no framework
         // scaling; point-fonts still grow, and ApplyDpi scales every pixel literal.
         AutoScaleMode = AutoScaleMode.None;
-        ClientSize = new Size(DesignW, DesignH);
+        // Placeholder client size — OnLoad pins the width to the DPI-scaled DesignW and fits
+        // the height to the laid-out content, so the window ends up exactly content-tall with
+        // no dead band at any DPI. See OnLoad.
+        ClientSize = new Size(DesignW, 150);
 
         _boldFont = new Font(UiTokens.PrimaryFont, 9.5f, FontStyle.Bold);
         _italicFont = new Font(UiTokens.PrimaryFont, 7.5f, FontStyle.Italic);
@@ -101,9 +105,13 @@ internal sealed class UpdateDialog : Form
             Margin = new Padding(0, 0, 0, 10),
         };
 
+        // The progress track lives in a fixed-height (reserved) row — see _root below — so the
+        // dialog is the same height whether the bar is shown (checking/downloading) or hidden
+        // (the resting "latest version"/error/winget states). The button never jumps and no
+        // dead band opens up when the bar disappears.
         _progressOuter = new Panel
         {
-            Size = new Size(350, 18),
+            Size = new Size(ProgressBarW, ProgressBarH),
             BackColor = Theme.EditBgColor,
             BorderStyle = BorderStyle.None,
             Anchor = AnchorStyles.None,
@@ -112,7 +120,7 @@ internal sealed class UpdateDialog : Form
         _progressFill = new Panel
         {
             Location = new Point(0, 0),
-            Size = new Size(0, 18),
+            Size = new Size(0, ProgressBarH),
             BackColor = UiTokens.SuccessGreen,
         };
         _progressOuter.Controls.Add(_progressFill);
@@ -142,32 +150,41 @@ internal sealed class UpdateDialog : Form
             FlowDirection = FlowDirection.LeftToRight,
             Anchor = AnchorStyles.None,
             BackColor = Color.Transparent,
-            Margin = new Padding(0),
+            Margin = new Padding(0, 6, 0, 0),   // small gap above the button row (replaces the old spacer)
         };
         buttons.Controls.Add(_btnAction);
         buttons.Controls.Add(_btnCancel);
 
+        // Dock=Top + AutoSize so OnLoad can fit the form's ClientSize to the laid-out content
+        // height (MicMute's content-fit convention — see SettingsDialog.OnLoad). The pre-fix
+        // layout had a 5th Percent(100) spacer row that, inside a fixed 180px-tall form,
+        // stretched to fill all leftover space and pushed the buttons to the very bottom —
+        // leaving a large dead band under the two status lines (the "too large / dispro-
+        // portionate" report). The four rows now stack tight from the top, and the progress
+        // row is Absolute so it reserves its slot even when the bar is hidden (stable height,
+        // no button jump between states).
         _root = new TableLayoutPanel
         {
-            Dock = DockStyle.Fill,
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
             ColumnCount = 1,
-            RowCount = 5,
+            RowCount = 4,
             BackColor = Color.Transparent,
             Padding = new Padding(16, 16, 16, 16),
             ColumnStyles = { new ColumnStyle(SizeType.Percent, 100f) },
             RowStyles =
             {
-                new RowStyle(SizeType.AutoSize),       // status
-                new RowStyle(SizeType.AutoSize),       // detail
-                new RowStyle(SizeType.AutoSize),       // progress
-                new RowStyle(SizeType.Percent, 100f),  // flexible spacer pushes buttons down
-                new RowStyle(SizeType.AutoSize),       // buttons
+                new RowStyle(SizeType.AutoSize),                // status
+                new RowStyle(SizeType.AutoSize),                // detail
+                new RowStyle(SizeType.Absolute, ProgressBarH),  // progress (reserved slot)
+                new RowStyle(SizeType.AutoSize),                // buttons
             },
         };
         _root.Controls.Add(_lblStatus, 0, 0);
         _root.Controls.Add(_lblDetail, 0, 1);
         _root.Controls.Add(_progressOuter, 0, 2);
-        _root.Controls.Add(buttons, 0, 4);
+        _root.Controls.Add(buttons, 0, 3);
         Controls.Add(_root);
 
         _marqueeTimer = new System.Windows.Forms.Timer { Interval = 30 };
@@ -182,8 +199,35 @@ internal sealed class UpdateDialog : Form
             _progressFill.Size = new Size(barW, _progressOuter.Height);
         };
 
-        Shown += async (_, _) => await CheckForUpdateAsync();
+        Shown += async (_, _) =>
+        {
+#if DEBUG
+            // The DPI render harness seeds a settled state via DiagPopulate and captures
+            // layout only — skip the live GitHub check so the capture is deterministic
+            // (and doesn't depend on network / the air-gapped test VM).
+            if (DiagRender.Active) return;
+#endif
+            await CheckForUpdateAsync();
+        };
     }
+
+#if DEBUG
+    /// <summary>
+    /// Render-harness only: force the settled "you're on the latest version" resting state
+    /// (the surface in the size-tightening report) so the rebuilt content-fit layout is
+    /// captured deterministically at the test DPI. Mirrors CapsNumTray.UpdateDialog.DiagPopulate.
+    /// </summary>
+    internal void DiagPopulate()
+    {
+        _marqueeTimer.Stop();
+        _lblStatus.Text = "You're on the latest version!";
+        _lblStatus.ForeColor = Theme.FgColor;
+        _lblDetail.Text = "Current: 2.3.0  →  GitHub: 2.3.0";
+        _progressOuter.Visible = false;
+        _btnAction.Visible = false;
+        _btnCancel.Text = "OK";
+    }
+#endif
 
     private static HttpClient CreateHttpClient()
     {
@@ -1025,11 +1069,18 @@ internal sealed class UpdateDialog : Form
     protected override void OnLoad(EventArgs e)
     {
         base.OnLoad(e);
-        // Scale every pixel literal (margins, progress track, button sizes) by the device
-        // factor and set the client size to the scaled design size, so 150% is exactly
-        // 100% x factor. Before the first paint → no visible resize.
+        // Scale every pixel literal (margins, progress track, button sizes, and the Absolute
+        // progress-row height) by the device factor, then fit the window: width = the scaled
+        // design width; height = the laid-out content height at that width. The progress row is
+        // reserved Absolute and the (initially empty) detail label keeps its single-line height,
+        // so this one measurement is valid for every later state — no per-state re-fit, no clip,
+        // no dead band. Done before the first paint → no visible resize. Mirrors
+        // SettingsDialog.OnLoad.
         UiLayout.ApplyDpi(_root);
-        ClientSize = new Size(LogicalToDeviceUnits(DesignW), LogicalToDeviceUnits(DesignH));
+        int w = LogicalToDeviceUnits(DesignW);
+        ClientSize = new Size(w, ClientSize.Height);
+        _root.PerformLayout();
+        ClientSize = new Size(w, _root.Height);
     }
 
     protected override void Dispose(bool disposing)

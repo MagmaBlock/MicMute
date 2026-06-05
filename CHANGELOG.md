@@ -4,6 +4,11 @@
 
 All notable changes to MicMute are documented here.
 
+## [2.3.1] - 2026-06-04
+
+### Changed
+- **Update dialog right-sized to its content.** The "Check for updates" window was a fixed 420×180 px with a flexible spacer row that stretched to fill the leftover height and pushed the OK button to the very bottom — so in the common "you're on the latest version" state the two short status lines clustered at the top with a large empty band between them and the button, which read as oversized and unbalanced. The dialog now fits its width to a tighter 360 px and its height to the laid-out content (the same content-fit pass the Settings dialog uses), so the window is exactly content-tall with the OK button sitting directly under the version line. The progress bar occupies a reserved fixed-height row, so the window is the same size whether the bar is shown (checking/downloading) or hidden (the resting / error / winget states) — no resize and no button jump between states. Scaling is unchanged (the deterministic `UiLayout.ApplyDpi` pass from v2.3.0), so the dialog stays proportionally identical at 100% and 150% display scale.
+
 ## [2.3.0] - 2026-06-04
 
 ### Fixed
