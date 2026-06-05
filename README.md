@@ -6,7 +6,7 @@
 [![Windows](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D6)](https://github.com/itsnateai/MicMute)
 [![GitHub Downloads](https://img.shields.io/github/downloads/itsnateai/MicMute/total)](https://github.com/itsnateai/MicMute/releases)
 
-Global hotkey microphone mute/unmute for Windows.
+Global hotkey microphone mute/unmute with push to talk for Windows.
 
 A lightweight system tray utility that lets you mute and unmute your microphone from anywhere using a hotkey or tray icon click. Works at the Windows audio level — affects all apps at once (Zoom, Discord, Teams, etc.).
 
