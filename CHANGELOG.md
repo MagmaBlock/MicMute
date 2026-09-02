@@ -4,6 +4,11 @@
 
 All notable changes to MicMute are documented here.
 
+## [2.4.0] - 2026-09-02
+
+### Added
+- **Mouse side buttons as Push-to-Talk hotkey.** Bind XButton1 (side "back"), XButton2 (side "forward") or MButton (middle) as your PTT key — click the hotkey field in Settings and press the button, or write `Hotkey=XButton1` in the INI. This rides the existing hookless polling path (`GetAsyncKeyState`), so there's no mouse hook and nothing new for game anti-cheat to flag. Verified against Windows: `RegisterHotKey` accepts mouse VKs but never posts `WM_HOTKEY` for them, so mouse buttons are Push-to-Talk only — Toggle mode and Deafen reject them with a targeted message ("Mouse buttons can only be used in Push-to-Talk mode") instead of a fake-successful registration that never fires. Legacy-INI migration leaves bare mouse keys untouched (they'd otherwise be rewritten into an unusable `^+XButton1`). Side-button presses still pass through to the focused app like any bound key; mouse driver suites (G HUB, Synapse) that rewrite side buttons into keystrokes at the driver level hide them from MicMute entirely — bind the rewritten key instead.
+
 ## [2.3.2] - 2026-06-04
 
 ### Fixed

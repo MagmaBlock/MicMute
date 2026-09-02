@@ -332,11 +332,14 @@ internal sealed class SettingsDialog : Form
         if (!string.IsNullOrEmpty(_capturedMainHK) &&
             !Config.ParseHotkey(_capturedMainHK, out uint mMods, out uint mVk, allowBare: pttMode))
         {
+            bool isMouse = Config.IsMouseVk(Config.KeyNameToVk(Config.ExtractKeyName(_capturedMainHK)));
             MessageBox.Show(this,
                 "Toggle Mute hotkey \"" + Config.HotkeyToReadable(_capturedMainHK) + "\" isn’t a valid binding.\n\n" +
-                (pttMode
-                    ? "In Push-to-Talk mode, bare keys are allowed only if they’re modifiers (LCtrl, RShift, etc.) or function keys."
-                    : "Bare keys aren’t allowed in Toggle mode — add at least one of Ctrl, Alt, Shift, or Win, or switch to Push-to-Talk."),
+                (isMouse
+                    ? "Mouse buttons (XButton1/XButton2/MButton) work only in Push-to-Talk mode — Windows’ global hotkey system never fires them."
+                    : pttMode
+                        ? "In Push-to-Talk mode, bare keys are allowed only if they’re modifiers (LCtrl, RShift, etc.) or function keys."
+                        : "Bare keys aren’t allowed in Toggle mode — add at least one of Ctrl, Alt, Shift, or Win, or switch to Push-to-Talk."),
                 "MicMute — Invalid hotkey",
                 MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return false;
@@ -344,9 +347,12 @@ internal sealed class SettingsDialog : Form
         if (!string.IsNullOrEmpty(_capturedDeafenHK) &&
             !Config.ParseHotkey(_capturedDeafenHK, out uint dMods, out uint dVk, allowBare: false))
         {
+            bool isMouseDeafen = Config.IsMouseVk(Config.KeyNameToVk(Config.ExtractKeyName(_capturedDeafenHK)));
             MessageBox.Show(this,
                 "Deafen Mute hotkey \"" + Config.HotkeyToReadable(_capturedDeafenHK) + "\" isn’t a valid binding.\n\n" +
-                "Deafen uses Windows’ global hotkey system, which needs at least one of Ctrl, Alt, Shift, or Win.",
+                (isMouseDeafen
+                    ? "Mouse buttons (XButton1/XButton2/MButton) work only for Push-to-Talk, not Deafen — Windows’ global hotkey system never fires them."
+                    : "Deafen uses Windows’ global hotkey system, which needs at least one of Ctrl, Alt, Shift, or Win."),
                 "MicMute — Invalid hotkey",
                 MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return false;
@@ -376,7 +382,12 @@ internal sealed class SettingsDialog : Form
         // call would fail and produce a false "claimed by another app" warning).
         bool mainUnchanged = _capturedMainHK.Equals(_config.Hotkey, StringComparison.OrdinalIgnoreCase);
         bool deafenUnchanged = _capturedDeafenHK.Equals(_config.DeafenHotkey, StringComparison.OrdinalIgnoreCase);
+        // Mouse-button main keys (PTT only) poll instead of registering, so the
+        // RegisterHotKey probe is meaningless for them — it fake-succeeds even
+        // though no WM_HOTKEY would ever arrive. Skip the probe entirely.
+        bool mainIsMouse = Config.IsMouseVk(Config.KeyNameToVk(Config.ExtractKeyName(_capturedMainHK)));
         if (!mainUnchanged &&
+            !mainIsMouse &&
             !string.IsNullOrEmpty(_capturedMainHK) &&
             Config.ParseHotkey(_capturedMainHK, out uint probeMMods, out uint probeMVk, allowBare: pttMode))
         {
@@ -476,6 +487,29 @@ internal sealed class SettingsDialog : Form
         // press cancels the previous animation cleanly (rapid bare-modifier mashing
         // would otherwise stack timers that tick over each other).
         System.Windows.Forms.Timer rowRejectTimer = null;
+        // Mouse-button capture: KeyDown never fires for XButton1/XButton2/MButton,
+        // so while capture mode is active we poll GetAsyncKeyState at the same
+        // 30 Hz the PTT hotkey path uses. Bare-key rules apply — mouse buttons
+        // are only accepted for cells that allow bare bindings (PTT main).
+        System.Windows.Forms.Timer mousePollTimer = null;
+
+        // (vk, iniName) pairs for the three bindable mouse buttons.
+        (int vk, string name)[] mouseButtons =
+        {
+            (0x05, "XButton1"),
+            (0x06, "XButton2"),
+            (0x04, "MButton"),
+        };
+
+        // True while the user is holding a bindable mouse button. Edge
+        // detection happens in the tick handler below.
+        bool mouseHeld = false;
+
+        void StopMousePoll()
+        {
+            mouseHeld = false;
+            mousePollTimer?.Stop();
+        }
 
         void Refresh()
         {
@@ -498,6 +532,13 @@ internal sealed class SettingsDialog : Form
             // CancelButton (closes Settings) and Enter fires OK.
             _capturingCancel = CancelCapture;
             _capturingCommit = () => { ActiveControl = null; };
+            // Start polling for mouse buttons (KeyDown never sees them).
+            // Lazy-create so cells that never capture never allocate a timer.
+            mousePollTimer ??= new System.Windows.Forms.Timer { Interval = 30 };
+            mousePollTimer.Tick -= MousePollTick;
+            mousePollTimer.Tick += MousePollTick;
+            mouseHeld = false;
+            mousePollTimer.Start();
             Refresh();
         }
 
@@ -508,6 +549,7 @@ internal sealed class SettingsDialog : Form
             preCaptureValue = null;
             _capturingCancel = null;
             _capturingCommit = null;
+            StopMousePoll();
             Refresh();
         }
 
@@ -519,8 +561,87 @@ internal sealed class SettingsDialog : Form
             preCaptureValue = null;
             _capturingCancel = null;
             _capturingCommit = null;
+            StopMousePoll();
             Refresh();
             ActiveControl = null; // blur off the field
+        }
+
+        // 30 Hz edge-detect on the bindable mouse buttons. On a down-edge,
+        // fill the cell exactly like a KeyDown would: prefix + key name.
+        // Mouse buttons are bare bindings — if bare keys aren't allowed
+        // here, run the same reject animation KeyDown uses.
+        void MousePollTick(object sender, EventArgs e)
+        {
+            if (!captureMode) return;
+
+            bool anyHeld = false;
+            foreach (var (vk, name) in mouseButtons)
+            {
+                bool down = (NativeMethods.GetAsyncKeyState(vk) & 0x8000) != 0;
+                if (!down) continue;
+                anyHeld = true;
+
+                if (mouseHeld) continue; // still holding the same button — wait for release
+                mouseHeld = true;
+
+                if (!bareKeysAllowed())
+                {
+                    RejectCapture("Mouse buttons need Push-to-Talk mode");
+                    return;
+                }
+
+                setCaptured(name);
+                ExitCapture();
+                return;
+            }
+
+            if (!anyHeld)
+                mouseHeld = false;
+        }
+
+        // Shared rejection animation: tint red, show message, restore when the
+        // reject timer fires (tracked in _activeRejectTimers for the Dispose sweep).
+        void RejectCapture(string message)
+        {
+            display.BackColor = UiTokens.ErrorTint;
+            string prevText = display.Text;
+            display.Text = message;
+            // Cancel any in-flight rejection animation on THIS cell before starting
+            // a new one (rapid key-mashing otherwise stacks ticking timers).
+            if (rowRejectTimer != null)
+            {
+                rowRejectTimer.Stop();
+                _activeRejectTimers.Remove(rowRejectTimer);
+                rowRejectTimer.Dispose();
+                rowRejectTimer = null;
+            }
+            var rejectTimer = new System.Windows.Forms.Timer
+            {
+                Interval = UiTokens.RejectAnimDurationMs,
+            };
+            rowRejectTimer = rejectTimer;
+            _activeRejectTimers.Add(rejectTimer);
+            rejectTimer.Tick += (_, _) =>
+            {
+                // Three races to defend against:
+                // (1) Dispose ran between WM_TIMER post and dequeue — the list no
+                //     longer contains rejectTimer; Stop on a disposed timer throws.
+                // (2) User pressed Escape during the 1800ms window — CancelCapture
+                //     re-painted the field, so restoring FocusYellow here would
+                //     strand the cell in capture-mode yellow.
+                // (3) The display TextBox was disposed — IsDisposed catches it.
+                if (!_activeRejectTimers.Remove(rejectTimer))
+                    return; // Dispose-sweep or multiple-active-guard already handled it.
+                rejectTimer.Stop();
+                rejectTimer.Dispose();
+                if (rowRejectTimer == rejectTimer)
+                    rowRejectTimer = null;
+                if (display.IsDisposed || !captureMode)
+                    return;
+                display.Text = prevText;
+                display.BackColor = UiTokens.FocusYellow;
+            };
+            rejectTimer.Start();
         }
 
         display.Click += (_, _) => EnterCapture();
@@ -561,47 +682,7 @@ internal sealed class SettingsDialog : Form
             {
                 if (!bare)
                 {
-                    // Briefly tint the display red to signal that bare modifiers aren't
-                    // accepted outside Push-to-Talk mode.
-                    display.BackColor = UiTokens.ErrorTint;
-                    string prevText = display.Text;
-                    display.Text = "Bare modifiers need Push-to-Talk mode";
-                    // Cancel any in-flight rejection animation on THIS cell before starting
-                    // a new one (rapid key-mashing otherwise stacks ticking timers).
-                    if (rowRejectTimer != null)
-                    {
-                        rowRejectTimer.Stop();
-                        _activeRejectTimers.Remove(rowRejectTimer);
-                        rowRejectTimer.Dispose();
-                        rowRejectTimer = null;
-                    }
-                    var rejectTimer = new System.Windows.Forms.Timer
-                    {
-                        Interval = UiTokens.RejectAnimDurationMs,
-                    };
-                    rowRejectTimer = rejectTimer;
-                    _activeRejectTimers.Add(rejectTimer);
-                    rejectTimer.Tick += (_, _) =>
-                    {
-                        // Three races to defend against:
-                        // (1) Dispose ran between WM_TIMER post and dequeue — the list no
-                        //     longer contains rejectTimer; Stop on a disposed timer throws.
-                        // (2) User pressed Escape during the 1800ms window — CancelCapture
-                        //     re-painted the field, so restoring FocusYellow here would
-                        //     strand the cell in capture-mode yellow.
-                        // (3) The display TextBox was disposed — IsDisposed catches it.
-                        if (!_activeRejectTimers.Remove(rejectTimer))
-                            return; // Dispose-sweep or multiple-active-guard already handled it.
-                        rejectTimer.Stop();
-                        rejectTimer.Dispose();
-                        if (rowRejectTimer == rejectTimer)
-                            rowRejectTimer = null;
-                        if (display.IsDisposed || !captureMode)
-                            return;
-                        display.Text = prevText;
-                        display.BackColor = UiTokens.FocusYellow;
-                    };
-                    rejectTimer.Start();
+                    RejectCapture("Bare modifiers need Push-to-Talk mode");
                     return;
                 }
                 const int VK_RSHIFT = 0xA1, VK_RCONTROL = 0xA3, VK_RMENU = 0xA5;

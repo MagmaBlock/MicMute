@@ -14,6 +14,7 @@ A lightweight system tray utility that lets you mute and unmute your microphone 
 
 - **Global hotkey**: `Win + Shift + Ctrl + A` (configurable) toggles mic mute system-wide
 - **Push-to-Talk mode**: Hold key to unmute, release to re-mute. Fullscreen-safe and accepts bare modifier keys (Right-Ctrl alone, etc.) the way Discord does — no keyboard hook, nothing for game anti-cheat to flag.
+- **Mouse side buttons**: Bind XButton1/XButton2 (mouse "back"/"forward") or the middle button as your Push-to-Talk key — same hookless polling path, no mouse hook installed. Mouse buttons are Push-to-Talk only (Windows' global hotkey system never fires them, so Toggle/Deafen can't use them), and side-button presses still pass through to the focused app, so unbind them in-game if a game also uses them. If your mouse software (G HUB, Synapse) rewrites side buttons to keystrokes at the driver level, bind that key instead — MicMute won't see 0x05/0x06.
 - **Sticky PTT**: Left-click the tray in Push-to-Talk mode to hold the mic open without holding the hotkey. A persistent "mic listening" bubble stays on screen so you can't forget. Click again to resume normal PTT.
 - **Deafen mode**: Mute both mic and speakers simultaneously (separate hotkey)
 - **Tray icon**: Green = active, Red = muted. Left-click to toggle.

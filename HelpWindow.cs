@@ -39,6 +39,8 @@ Toggle (default): Press the hotkey once to mute, press again to unmute.
 
 Push-to-Talk: Hold the hotkey to unmute. Releasing it mutes you again. Useful for noisy environments where you only want to be heard while actively speaking.
 
+Mouse buttons as Push-to-Talk: In Push-to-Talk mode you can bind mouse buttons — XButton1 (side ""back""), XButton2 (side ""forward"") or MButton (middle). Click the hotkey field in Settings and press the button. Mouse buttons work only in Push-to-Talk mode: Windows' global hotkey system never fires them, so Toggle and Deafen can't use them. Side-button presses still reach the focused app (e.g. a game you're playing), same as any other key you bind.
+
 Switch modes via the tray menu (Mode → Toggle / Push-to-Talk), or enable ""Middle-click tray icon to toggle"" in Settings to quickly swap between them.
 
 ——— DEAFEN MODE ———————————————————

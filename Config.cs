@@ -211,9 +211,16 @@ internal sealed class Config
     /// legacy INI, rewrite these with a safe "Ctrl+Shift+" prefix so their
     /// hotkey keeps working instead of silently falling back to tray-only.
     /// </summary>
-    private string MigrateLegacyHotkey(string value)
+    internal string MigrateLegacyHotkey(string value)
     {
         if (string.IsNullOrEmpty(value))
+            return value;
+        // Mouse buttons are valid PTT bindings on the polling path but never
+        // parse under the RegisterHotKey rules (allowBare: false) this check
+        // uses — leave them alone or we'd rewrite "XButton1" into
+        // "^+XButton1", which parses under no path (mouse keys reject the
+        // RegisterHotKey route even with modifiers) and kills the binding.
+        if (IsMouseVk(KeyNameToVk(ExtractKeyName(value))))
             return value;
         if (ParseHotkey(value, out _, out _))
             return value; // already valid under v2.1.6 rules
@@ -377,7 +384,9 @@ internal sealed class Config
         "LALT" or "LMENU" => "LAlt",
         "RALT" or "RMENU" => "RAlt",
         "LWIN" => "LWin",
-        "RWIN" => "RWin",
+        "MBUTTON" => "MButton",
+        "XBUTTON1" => "XButton1",
+        "XBUTTON2" => "XButton2",
         _ => key.ToUpperInvariant(),
     };
 
@@ -484,6 +493,21 @@ internal sealed class Config
         // would hijack a generic key globally. Function keys are an exception:
         // they're rarely typed during normal use and RegisterHotKey handles
         // them. Everything else requires a modifier unless allowBare is set.
+        //
+        // Mouse buttons follow the polling path too: GetAsyncKeyState reports
+        // their live state (so PTT can poll them), but RegisterHotKey never
+        // posts WM_HOTKEY for them. Reject them when the caller is headed for
+        // RegisterHotKey (allowBare == false) so the failure is loud here
+        // instead of a silent never-fires registration downstream. A bare
+        // mouse button is also the natural binding — "XButton1 held" — so
+        // treat any modifier-prefixed mouse binding the same way: the polling
+        // path evaluates modifiers separately, but a mouse button is itself
+        // the trigger and combinations are meaningless to register.
+        if (IsMouseVk(vk))
+        {
+            return allowBare;
+        }
+
         bool isFunctionKey = vk >= 0x70 && vk <= 0x87; // VK_F1..VK_F24
         if (realMods == 0 && !isFunctionKey && !allowBare)
             return false;
@@ -540,7 +564,17 @@ internal sealed class Config
     internal static bool IsBareModifierVk(uint vk) =>
         vk is 0xA0 or 0xA1 or 0xA2 or 0xA3 or 0xA4 or 0xA5 or 0x5B or 0x5C;
 
-    private static uint KeyNameToVk(string keyName)
+    /// <summary>
+    /// Whether the given VK is a mouse-button key. GetAsyncKeyState reports
+    /// live state for these (verified: XBUTTON1 held reads 0x8000), so the
+    /// PTT polling path can bind them. RegisterHotKey accepts the
+    /// registration but never posts WM_HOTKEY for them — the Toggle and
+    /// Deafen (RegisterHotKey) paths must reject them explicitly instead of
+    /// letting the registration "succeed" silently.
+    /// </summary>
+    internal static bool IsMouseVk(uint vk) => vk is 0x04 or 0x05 or 0x06;
+
+    internal static uint KeyNameToVk(string keyName)
     {
         if (string.IsNullOrEmpty(keyName))
             return 0;
@@ -592,6 +626,11 @@ internal sealed class Config
             "RALT" or "RMENU" => 0xA5,
             "LWIN" => 0x5B,
             "RWIN" => 0x5C,
+            // Mouse buttons — PTT-polling path only (GetAsyncKeyState reports
+            // live state; RegisterHotKey never fires WM_HOTKEY for them).
+            "MBUTTON" => 0x04,     // VK_MBUTTON — middle button
+            "XBUTTON1" => 0x05,    // VK_XBUTTON1 — side "back" button
+            "XBUTTON2" => 0x06,    // VK_XBUTTON2 — side "forward" button
             "NUMPAD0" => 0x60,
             "NUMPAD1" => 0x61,
             "NUMPAD2" => 0x62,

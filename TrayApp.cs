@@ -819,12 +819,24 @@ internal sealed class TrayApp : Form
         UnregisterMainHotkey();
 
         // PTT mode takes the polling path unconditionally — fullscreen-safe,
-        // accepts bare modifier keys, no anti-cheat signature. Toggle mode
-        // uses RegisterHotKey (event-driven, zero idle cost).
+        // accepts bare modifier keys AND mouse buttons, no anti-cheat
+        // signature. Toggle mode uses RegisterHotKey (event-driven, zero
+        // idle cost) — which never posts WM_HOTKEY for mouse VKs, so
+        // ParseHotkey rejects them there and we surface a targeted hint
+        // instead of the generic "invalid hotkey".
         bool pttMode = _config.Mode == "push-to-talk";
         if (!Config.ParseHotkey(_config.Hotkey, out uint mods, out uint vk, allowBare: pttMode))
         {
-            ShowTimedTooltip("Invalid hotkey: " + _config.Hotkey + "\nFalling back to tray-only mode.", 5000);
+            if (Config.IsMouseVk(Config.KeyNameToVk(Config.ExtractKeyName(_config.Hotkey))))
+            {
+                ShowTimedTooltip(
+                    "Mouse buttons can only be used in Push-to-Talk mode.\n" +
+                    "Switch modes via the tray menu, then bind XButton1/XButton2.", 5000);
+            }
+            else
+            {
+                ShowTimedTooltip("Invalid hotkey: " + _config.Hotkey + "\nFalling back to tray-only mode.", 5000);
+            }
             return;
         }
 
@@ -869,7 +881,13 @@ internal sealed class TrayApp : Form
 
         if (!Config.ParseHotkey(_config.DeafenHotkey, out uint mods, out uint vk))
         {
-            ShowTimedTooltip("Invalid deafen hotkey: " + _config.DeafenHotkey, 5000);
+            // Deafen only ever registers through RegisterHotKey, which never
+            // posts WM_HOTKEY for mouse VKs — point mouse bindings at PTT
+            // explicitly instead of the generic "invalid" message.
+            ShowTimedTooltip(
+                Config.IsMouseVk(Config.KeyNameToVk(Config.ExtractKeyName(_config.DeafenHotkey)))
+                    ? "Mouse buttons only work for Push-to-Talk, not Deafen."
+                    : "Invalid deafen hotkey: " + _config.DeafenHotkey, 5000);
             return;
         }
 
