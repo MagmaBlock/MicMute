@@ -63,7 +63,7 @@ jobs:
             Write-Host "Extracted release notes for v$version ($($notes.Length) chars)"
           } else {
             # Fallback so the release still ships even if the changelog wasn't updated
-            Set-Content -Path RELEASE_NOTES.md -Value "See [CHANGELOG.md](https://github.com/itsnateai/MicMute/blob/main/CHANGELOG.md) for release notes." -Encoding UTF8
+            Set-Content -Path RELEASE_NOTES.md -Value "See [CHANGELOG.md](https://github.com/MagmaBlock/MicMute/blob/main/CHANGELOG.md) for release notes." -Encoding UTF8
             Write-Host "::warning::No CHANGELOG section found for v$version — using fallback body."
           }
 

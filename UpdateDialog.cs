@@ -45,7 +45,7 @@ internal sealed class UpdateDialog : Form
     private static System.Windows.Forms.Timer _toastOuterTimer;
 
     private const string AppName = "MicMute";
-    private const string GitHubRepo = "itsnateai/MicMute";
+    private const string GitHubRepo = "MagmaBlock/MicMute";
 
     // Defense-in-depth size caps — prevent OOM/disk-fill if an attacker-
     // controlled release ever serves a pathologically large response.
